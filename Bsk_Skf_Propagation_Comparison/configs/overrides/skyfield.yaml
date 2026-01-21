@@ -1,0 +1,3 @@
+# These configuration options are currently in configs/default.yaml
+SKYFIELD_SIMULATION:
+  deltaT: 5  # Seconds, int

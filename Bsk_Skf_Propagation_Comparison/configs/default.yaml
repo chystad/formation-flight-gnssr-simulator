@@ -1,0 +1,45 @@
+# Global simulation configuration settings
+SIMULATION:
+  startTime: "23.10.2025 22:19:30" # UTC time
+  simulationDuration: 6 # hours
+  tle_export_path: "Bsk_Skf_Propagation_Comparison/data/tle_files/" # TODO: move to Config_def
+  use_old_skf_data: false # Skip Skyfield simulation (used when you want to use the same SGP4 baseline to compare against multiple Basilisk runs)
+  old_skf_data_timestamp: "20251216_110041" # Timestamp WITHOUT "_skf" at the end
+
+# Plotting options
+PLOTTING:
+  show_plots: true
+  save_plots: false
+  bypass_sim_to_plot: false
+  data_timestamp_to_plot: "20251216_084208" # Only plots this data if bypass_sim_to_plot == true
+  plot_prev_sim: false # TODO: NOT IMPLEMENTED. Also, 'implement func that skips simulations if this is true
+
+# Global satellites and their TLE data
+# Satellite #1 will be considered as the formation Chef/Leader satellite 
+SATELLITES:
+  satellite1:
+    name: "HYPSO-1"             
+    tle_line1: "1 51053U 22002BX  25296.93021535  .00034531  00000+0  64114-3 0  9996"
+    tle_line2: "2 51053  97.3166   6.7052 0004161  83.3535 276.8189 15.48851464210108" 
+    m_s: 6.0  # [kg] Satellite mass
+    C_D: 2.2  # Drag coefficient
+    A_D: 0.06 # [m^2] Cross-section area perpendicular to the velocity
+    C_R: 1.21  # Radiation pressure coefficient 
+    A_srp: 0.06 # [m^2] Cross-section area perpendicular to the Sun-vector 
+  satellite2:
+    name: "HYPSO-1-follower"             
+    tle_line1: "1 51053U 22002BX  25296.93021535  .00034531  00000+0  64114-3 0  9996"
+    tle_line2: "2 51053  97.3166   6.7052 0004161  83.3535 266.8189 15.48851464210108"    
+    m_s: 6.0  # [kg] Satellite mass
+    C_D: 2.2  # Drag coefficient
+    A_D: 0.06 # [m^2] Cross-section area perpendicular to the velocity
+    C_R: 1.21  # Radiation pressure coefficient
+    A_srp: 0.06 # [m^2] Cross-section area perpendicular to the Sun-vector 
+
+# Skyfield specific settings
+SKYFIELD:
+  config_path: Bsk_Skf_Propagation_Comparison/configs/overrides/skyfield.yaml
+
+# Basilisk specific settings
+BASILISK:
+  config_path: Bsk_Skf_Propagation_Comparison/configs/overrides/basilisk.yaml

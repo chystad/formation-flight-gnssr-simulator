@@ -1,0 +1,16 @@
+# Ignore all files in /data/
+data/
+
+# Ignore all files in /archive/
+archive/
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore Python cache folders
+src/__pycache__/
+src/object_definitions/__pycache__/
+src/plotting/__pycache__/
+
+# Ignore test-script
+testing.pydata/_VizFiles/
