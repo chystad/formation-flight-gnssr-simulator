@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
 # Global definition of data save folder path
-DATA_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/data/sim_data')
+DATA_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
 
 
 @dataclass_json

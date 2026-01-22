@@ -16,8 +16,8 @@ from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, 
 from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion,
                                 simIncludeGravBody, unitTestSupport, vizSupport)
 
-VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Bsk_Skf_Propagation_Comparison/data/_VizFiles/bsk_sim.bin"
-GRAV_COEFF_FILE_PATH = "shared_parameters/grav_coeff/GGM03S.txt"
+VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Bsk_Skf_Propagation_Comparison/output_data/_VizFiles/bsk_sim.bin"
+GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
 
 """
 =========================================================================================================

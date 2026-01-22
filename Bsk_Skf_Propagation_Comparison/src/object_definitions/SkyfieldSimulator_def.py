@@ -156,7 +156,7 @@ class SkyfieldSimulator():
 
     def output_data(self) -> None:
         """
-        Write the simulation data to a file named '<cfg.timestamp_str>_skf.h5' stored in data/sim_data/
+        Write the simulation data to a file named '<cfg.timestamp_str>_skf.h5' stored in output_data/sim_data/
         """
         
         # Check that simulation data has been stored

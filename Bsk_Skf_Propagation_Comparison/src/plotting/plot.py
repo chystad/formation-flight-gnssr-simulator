@@ -16,7 +16,7 @@ from plotting.DataProcessor_def import DataProcessor
 
 
 RTN_DOWNSAMP_FAC: int = 5
-PLT_SAVE_FOLDER_PATH = Path('data/sim_plt')
+PLT_SAVE_FOLDER_PATH = Path('output_data/sim_plt')
 PLT_HEIGHT = 6.0
 PLT_WIDTH = 16.0
 

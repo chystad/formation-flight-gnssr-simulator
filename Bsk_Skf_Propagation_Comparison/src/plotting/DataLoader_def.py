@@ -14,7 +14,7 @@ class DataLoader:
 
     def load_sim_data_file(self, filename: str) -> SimData:
         """
-        Read an HDF5 file at data/sim_out/<filename>[.h5] and return a SimData instance.
+        Read an HDF5 file at output_data/sim_out/<filename>[.h5] and return a SimData instance.
 
         Expected HDF5 layout:
         /time           (1,n)
@@ -121,7 +121,7 @@ class DataLoader:
 
         Args:
             cfg (Config): simulation config object
-            datafiles_to_plot (list[str]): list holding 2 filenames of data contained in 'data/sim_data'. 
+            datafiles_to_plot (list[str]): list holding 2 filenames of data contained in 'output_data/sim_data'. 
                 One filename must contain the identifyer 'skf', and the other 'bsk'.
         """
         assert len(datafiles_to_plot) == 2

@@ -2,7 +2,7 @@
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # UTC time
   simulationDuration: 6 # hours
-  tle_export_path: "Bsk_Skf_Propagation_Comparison/data/tle_files/" # TODO: move to Config_def
+  tle_export_path: "Bsk_Skf_Propagation_Comparison/output_data/tle_files/" # TODO: move to Config_def
   use_old_skf_data: false # Skip Skyfield simulation (used when you want to use the same SGP4 baseline to compare against multiple Basilisk runs)
   old_skf_data_timestamp: "20251216_110041" # Timestamp WITHOUT "_skf" at the end
 

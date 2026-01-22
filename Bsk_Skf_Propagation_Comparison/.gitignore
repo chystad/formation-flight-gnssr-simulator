@@ -1,5 +1,5 @@
-# Ignore all files in /data/
-data/
+# Ignore all files in /output_data/
+output_data/
 
 # Ignore all files in /archive/
 archive/

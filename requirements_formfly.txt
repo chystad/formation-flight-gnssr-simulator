@@ -1,5 +1,6 @@
 bokeh==3.7.2
-bsk @ file:///home/chris/code/basilisk
+-e git+https://github.com/AVSLab/basilisk.git@279eda8ee83815261a45637775002b911419412d#egg=bsk
+Cartopy==0.25.0
 certifi==2025.8.3
 cfgv==3.4.0
 charset-normalizer==3.4.3
@@ -16,10 +17,13 @@ execnet==2.1.1
 fasteners==0.20
 filelock==3.19.1
 fonttools==4.60.0
+git-filter-repo==2.47.0
+h5py==3.15.1
 identify==2.6.14
 idna==3.10
 iniconfig==2.1.0
 Jinja2==3.1.6
+jplephem==2.23
 kiwisolver==1.4.9
 MarkupSafe==3.0.3
 marshmallow==3.26.1
@@ -37,7 +41,10 @@ pluggy==1.6.0
 pre_commit==4.2.0
 protobuf==6.30.2
 psutil==7.0.0
+pymap3d==3.2.0
 pyparsing==3.2.5
+pyproj==3.7.2
+pyshp==3.0.3
 pytest==8.3.5
 pytest-html==4.1.1
 pytest-metadata==3.1.1
@@ -50,7 +57,10 @@ PyYAML==6.0.3
 requests==2.32.3
 setuptools==78.1.0
 setuptools-scm==8.2.0
+sgp4==2.25
+shapely==2.1.2
 six==1.17.0
+skyfield==1.53
 tornado==6.5.2
 tqdm==4.67.1
 typing-inspect==0.9.0

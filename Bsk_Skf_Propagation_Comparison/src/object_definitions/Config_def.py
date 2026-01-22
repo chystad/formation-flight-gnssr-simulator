@@ -12,7 +12,7 @@ from object_definitions.Satellite_def import Satellite
 from object_definitions.TwoLineElement_def import TLE
 from object_definitions.SimData_def import DATA_SAVE_FOLDER_PATH
 
-COMBINED_CFG_SAVE_FOLDER = Path('Bsk_Skf_Propagation_Comparison/data/sim_data')
+COMBINED_CFG_SAVE_FOLDER = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
 
 """
 =========================================================================================================
@@ -181,7 +181,7 @@ class Config:
     def save_combined_config(self, config_file_path: str, loaded_default_cfg) -> None:
         """
         Combine default.yaml, skyfield.yaml, and basilisk.yaml into one file and save as:
-            <repo_root>/Bsk_Skf_Propagation_Comparison/data/sim_data/<timestamp_str>_cfg.yaml
+            <repo_root>/Bsk_Skf_Propagation_Comparison/output_data/sim_data/<timestamp_str>_cfg.yaml
 
         Order: default, then skyfield, then basilisk.
         """
