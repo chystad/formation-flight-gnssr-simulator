@@ -1,0 +1,28 @@
+# Satellite parameters:
+#   m_s:    [kg]  Satellite mass
+#   C_D:          Drag coefficient
+#   A_D:    [m^2] Cross-section area perpendicular to the velocity vector
+#   C_R:          Radiation pressure coefficient
+#   A_srp:  [m^2] Cross-section area perpendicular to thhe Sun-vector
+
+SATELLITES:
+  leader:
+    m_s: 6.0
+    C_D: 2.2 
+    A_D: 0.06
+    C_R: 1.21
+    A_srp: 0.06
+  follower-1:
+    m_s: 6.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+  follower-2:
+    m_s: 6.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+
+# [Work in progress] Add more satellites or parameters if needed...

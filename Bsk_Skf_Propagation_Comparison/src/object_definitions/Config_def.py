@@ -10,9 +10,7 @@ from dataclasses_json import dataclass_json
 
 from object_definitions.Satellite_def import Satellite
 from object_definitions.TwoLineElement_def import TLE
-from object_definitions.SimData_def import DATA_SAVE_FOLDER_PATH
-
-COMBINED_CFG_SAVE_FOLDER = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
+from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
 
 """
 =========================================================================================================
@@ -63,9 +61,8 @@ class Config:
            config_file_path                    
         
         ATTRIBUTES:
-            startTime (str):
-            simulationDuration (float):
-            tle_export_path (str):
+            startTime (str):                TODO: Replace with functionality that automatically uses the Epoch from the oldest TLE file as startDate
+            simulationDuration (float):     Simulation duration in hours
             use_old_skf_data (bool):        If true: skip the Skyfield simulation and instead use the data from a previous run.
                                                 Used when you want to compare the same SGP4 baseline against multiple Basilisk runs.
             old_skf_data_timestamp (str):   Timestamp str for the old Skyfield data
@@ -73,8 +70,12 @@ class Config:
             save_plots (bool):              Save plots if true
             bypass_sim_to_plot (bool):      If true: Skip the simulation to plot old data
             data_timestamp_to_plot (str):   Timestamp str for the data to plot. Only plot this if 'bypass_sim_to_plot' == true
+            satellite_param_path (str):     Path to the .yaml file containing the physical satellite parameters
+            leader_tle_series_path (str):   Path to the .txt file containing a series of TLEs from oldest to newest for the leader satellite
+            inplane_separation_ang (float): The in-plane orbital separation angle in degrees
+            num_satellites (int):           The total number of satellites included in the simulation (leader + #follower(s))
             timestamp_str (str):            Used in the naming of data files. str holding the real-world simulation start time.
-            satellites (list[Satellite]):   One Satellite instance for each satellite described in the default config.
+          # satellites (list[Satellite]):   One Satellite instance for each satellite described in the default config.
             b_set (BasiliskSettings):       BasiliskSettings instance describing the Basilisk simulation settings
             s_set (SkyfieldSettings):       SkyfieldSettings instance describing the Skyfield simulation settings     
         =========================================================================================================
@@ -90,47 +91,53 @@ class Config:
         # Fetch parameters from the various config files #
         ##################################################
         # Fetch from default.yaml
-        startTime_str = d_cfg['SIMULATION']['startTime'] # str
-        simulationDuration = d_cfg['SIMULATION']['simulationDuration'] # float  
-        tle_export_path = d_cfg['SIMULATION']['tle_export_path'] # str
-        use_old_skf_data = d_cfg['SIMULATION']['use_old_skf_data'] # bool
-        old_skf_data_timestamp = d_cfg['SIMULATION']['old_skf_data_timestamp'] # str
-        show_plots = d_cfg['PLOTTING']['show_plots'] # bool
-        save_plots = d_cfg['PLOTTING']['save_plots'] # bool
-        bypass_sim_to_plot =  d_cfg['PLOTTING']['bypass_sim_to_plot'] # str
-        data_timestamp_to_plot = d_cfg['PLOTTING']['data_timestamp_to_plot'] # str
+        startTime_str =             d_cfg['SIMULATION']['startTime'] # str
+        simulationDuration =        d_cfg['SIMULATION']['simulationDuration'] # float  
+        use_old_skf_data =          d_cfg['SIMULATION']['use_old_skf_data'] # bool
+        old_skf_data_timestamp =    d_cfg['SIMULATION']['old_skf_data_timestamp'] # str
+        show_plots =                d_cfg['PLOTTING']['show_plots'] # bool
+        save_plots =                d_cfg['PLOTTING']['save_plots'] # bool
+        bypass_sim_to_plot =        d_cfg['PLOTTING']['bypass_sim_to_plot'] # str
+        data_timestamp_to_plot =    d_cfg['PLOTTING']['data_timestamp_to_plot'] # str
+        satellite_param_path =      d_cfg['SATELLITES']['satellite_param_path'] # str
+        leader_tle_series_path =    d_cfg['SATELLITES']['leader_tle_series_path'] # str
+        inplane_separation_ang =    d_cfg['SATELLITES']['inplane_separation_ang'] # float
+        num_satellites =            d_cfg['SATELLITES']['num_satellites'] # int
 
         # Fetch from basilisk.yaml
-        bsk_deltaT = b_cfg['BASILISK_SIMULATION']['deltaT']
-        integrator = b_cfg['BASILISK_SIMULATION']['integrator']
-        sphericalHarmonicsDegree = b_cfg['BASILISK_SIMULATION']['sphericalHarmonicsDegree']
-        useSphericalHarmonics = b_cfg['BASILISK_SIMULATION']['useSphericalHarmonics']
-        useExponentialDensityDrag = b_cfg['BASILISK_SIMULATION']['useExponentialDensityDrag']
-        useSRP = b_cfg['BASILISK_SIMULATION']['useSRP']
-        useSun3rdBody = b_cfg['BASILISK_SIMULATION']['useSun3rdBody']
-        useMoon3rdBody = b_cfg['BASILISK_SIMULATION']['useMoon3rdBody']
-        override_skf_initial_state = b_cfg['BASILISK_SIMULATION']['override_skf_initial_state']
+        bsk_deltaT =                    b_cfg['BASILISK_SIMULATION']['deltaT']
+        integrator =                    b_cfg['BASILISK_SIMULATION']['integrator']
+        sphericalHarmonicsDegree =      b_cfg['BASILISK_SIMULATION']['sphericalHarmonicsDegree']
+        useSphericalHarmonics =         b_cfg['BASILISK_SIMULATION']['useSphericalHarmonics']
+        useExponentialDensityDrag =     b_cfg['BASILISK_SIMULATION']['useExponentialDensityDrag']
+        useSRP =                        b_cfg['BASILISK_SIMULATION']['useSRP']
+        useSun3rdBody =                 b_cfg['BASILISK_SIMULATION']['useSun3rdBody']
+        useMoon3rdBody =                b_cfg['BASILISK_SIMULATION']['useMoon3rdBody']
+        override_skf_initial_state =    b_cfg['BASILISK_SIMULATION']['override_skf_initial_state']
 
         # Fetch from skyfield.yaml
         skf_deltaT = s_cfg['SKYFIELD_SIMULATION']['deltaT']
 
         # Create Satellite intstances
-        satellites = self.generate_satellite_instances_from_config(d_cfg)
+        # satellites = self.generate_satellite_instances_from_config(d_cfg)
         
         ##############################
         # Assign instance attributes #
         ##############################
         self.startTime = startTime_str
         self.simulationDuration = simulationDuration
-        self.tle_export_path = tle_export_path
         self.use_old_skf_data = use_old_skf_data
         self.old_skf_data_timestamp = old_skf_data_timestamp
         self.show_plots = show_plots
         self.save_plots = save_plots
         self.bypass_sim_to_plot = bypass_sim_to_plot
         self.data_timestamp_to_plot = data_timestamp_to_plot
+        self.satellite_param_path = satellite_param_path
+        self.leader_tle_series_path = leader_tle_series_path
+        self.inplane_separation_ang = inplane_separation_ang
+        self.num_satellites = num_satellites
         self.timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.satellites = satellites
+        # self.satellites = satellites
 
         # Assign BasiliskSettings instance to b_set attribute
         self.b_set = BasiliskSettings(
@@ -150,7 +157,7 @@ class Config:
             skf_deltaT
         )
 
-        # Save a combined config under COMBINED_CFG_SAVE_FOLDER if the simulation is not bypassed
+        # Save a combined config under OUTPUT_DATA_SAVE_DIR if the simulation is not bypassed
         if not bypass_sim_to_plot:
             self.save_combined_config(config_file_path, d_cfg)
         
@@ -160,7 +167,7 @@ class Config:
             # Check if there are any datafiles with the timestamp 'data_timestamp_to_plot'
             # Collect all matching .h5 files and return their names as strings
             matching_files = [
-                file.name for file in DATA_SAVE_FOLDER_PATH.glob(f"{data_timestamp_to_plot}*.h5")
+                file.name for file in OUTPUT_DATA_SAVE_DIR.glob(f"{data_timestamp_to_plot}*.h5")
             ]
             if matching_files == []:
                 raise FileNotFoundError(f"Datafile with timestamp: '{data_timestamp_to_plot}' was not found.")
@@ -186,10 +193,10 @@ class Config:
         Order: default, then skyfield, then basilisk.
         """
         # Ensure output directory exists
-        COMBINED_CFG_SAVE_FOLDER.mkdir(parents=True, exist_ok=True)
+        OUTPUT_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
         # Build output path using timestamp_str from this Config instance
-        out_path = COMBINED_CFG_SAVE_FOLDER / f"{self.timestamp_str}_cfg.yaml"
+        out_path = OUTPUT_DATA_SAVE_DIR / f"{self.timestamp_str}_cfg.yaml"
 
         # Config paths
         default_cfg_path = Path(config_file_path)
@@ -226,11 +233,6 @@ class Config:
     def generate_satellite_instances_from_config(loaded_default_cfg) -> list[Satellite]:
         """
         TODO: Write docstring...
-
-        TODO: Add functionality to handle the case where initial pos/vel is not provided in default.yaml:
-                -> Okay if 'use_custom_initial_state' == false (from basilisk.yaml)
-                    -> Assign None for satellite atributes related to the initial custom pos/vel
-                -> Error otherwise
         """
 
         def _parse_inital_states_from_config(initial_pos: str, initial_vel: str) -> tuple[NDArray[np.float64], NDArray[np.float64]]:

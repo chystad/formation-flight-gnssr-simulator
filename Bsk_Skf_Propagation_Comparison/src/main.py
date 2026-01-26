@@ -5,7 +5,6 @@ from plotting.plot import plot
 from object_definitions.BasiliskSimulator_def import BasiliskSimulator
 from object_definitions.SkyfieldSimulator_def import SkyfieldSimulator
 
-
 def simualte_satellite_orbits():
 
     # Load config and define all neccessary objects
@@ -42,18 +41,10 @@ if __name__ == "__main__":
 
 # TODO
 """
-Disturbance:
-* Implement functionality to log disturbance forces
-
-
-Plotting:
-* Change y-axis scaling to km or logarithmic
-* Add absolute simulator disagreements
-* Change plot colors where the two simulation outputs are shown in the same plot
+* Merge config files into one
+* Fix the creation of common Satellite objects that are compatible with both the new config structure and TLE-handeling
 
 
 Simulator Misk:
-* Generate timestamped .bin files for Vizard without overwriting old data (like it is already implemented in sim_data)
-* Fix multiple loading and writing of the same Skyfield data when 'use_old_skf_data' = True
 * To Master: Enable the option to queue multiple simulation runs with different configurations
 """

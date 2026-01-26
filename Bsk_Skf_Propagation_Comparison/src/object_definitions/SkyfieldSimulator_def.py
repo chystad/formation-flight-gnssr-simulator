@@ -2,14 +2,15 @@ import os
 import shutil # For therminal width
 import logging
 import numpy as np
+from pathlib import Path
 from numpy.typing import NDArray
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
-# from object_definitions.BaseSimulator_def import BaseSimulator
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimObjData, SimData
+from object_definitions.TLE_def import TLE
 from plotting.DataLoader_def import DataLoader
 
 from skyfield.timelib import Time
@@ -20,116 +21,149 @@ class SkyfieldSimulator():
     """
     =========================================================================================================
     ATTRIBUTES:
-        cfg             
-        startTime       
-        duration       
-        deltaT          
-        skf_satellites
-        sim_data (list[SimObjectData])
+        cfg                         (Config)
+        times                       (list[Time]) List of UTC Skyfield simulation times
+        sim_offset                  (NDArray[np.float64]) Corresponding Matplotlib-compatible time vector
+        sat_tle_idx_at_times        (list[int]) Indeces giving which satellite/TLE to use at any simulation time
+        all_skf_satellite_series    (list[list[EarthSatellite]]) Contains a series of EarthSatellite objects for each satellite
+        satellite_names             (list[str]) Satellite names/identifiers
+        sim_data                    (Optional[SimData]) Skyfield simulation output data
     =========================================================================================================
     """
-    
+
     def __init__(self, cfg: Config) -> None:
         logging.debug("Setting up Skyfield simulation...")
-
-        ###############
-        # Load config #s
-        ###############
-
-        d_set = cfg        # default config
-        s_set = cfg.s_set  # basilisk config
-
 
         ###################################
         # Configure simulation parameters #
         ###################################
+        startTime, duration, deltaT = self.get_skf_simulation_time(cfg) # TODO: modify this function to get startTime from oldest TLE in shared_input_data/tle_files/HYPSO-1_tle_series.txt
 
-        startTime, duration, deltaT = self.get_skf_simulation_time(cfg)
+
+        ########################
+        # Populate time-vector #
+        ########################
+        times: list[Time] = []
+        ts = load.timescale()
+        for t in range(0, duration, deltaT):
+            time = ts.utc(startTime + timedelta(seconds=t))
+            times.append(time)
+
+        # Convert to matplotlib-compatible simulation offset
+        sim_offset = self.skf_time_to_offset(times, startTime)
+
+
+        #################################
+        # Verify and Create TLE file(s) #
+        #################################
+        leader_tle_path = Path(cfg.leader_tle_series_path)
+        tle_processor = TLE()
+        tle_processor.verify_leader_TLE_series_file(leader_tle_path)
+
+        # Generate a TLE file for each follower and get their output paths
+        tle_paths = tle_processor.generate_follower_tle_files(cfg)
+
+        # Insert the leader TLE file to get a comprehensive list of all TLE file paths
+        tle_paths.insert(0, cfg.leader_tle_series_path)
 
 
         #######################################################
         # Load TLE files to create Skyfield satellite objects #
         #######################################################
+        # NOTE: Each TLE file will generate a series of 'EarthSatellite' objects.
+        #       These describe the orbit of the same satellite, but with different epochs
+        all_skf_satellite_series: list[list[EarthSatellite]] = []
+        satellite_names: list[str] = []
 
-        # Create a tle file containing all the TLE information from the config file
-        output_tle_path = self.create_tle_file(cfg)
+        for i, tle_path in enumerate(tle_paths):        
+            # Generate a series of Skyfield EarthSatellite objects for each satellite
+            skf_satellite_series = load.tle_file(tle_path)
+            all_skf_satellite_series.append(skf_satellite_series)
+            
+            # Get satellite names/identifiers
+            satellite_name = skf_satellite_series[0].name
+            if isinstance(satellite_name, str):
+                if satellite_name in satellite_names:
+                    raise ValueError(f"The satellite name: {satellite_name} already exists in 'satellite_names'")
+                satellite_names.append(satellite_name)
+            
+        # Raise error if the number of satellite series is not as expected
+        if not len(all_skf_satellite_series) == cfg.num_satellites:
+            raise ValueError("The number of Skyfield EarthSatellite series does not match the expected number of satellites defined by default.yaml")
 
-        # Genera a list of Skyfield Earth satellites
-        # (The notation is confusing when the other parameters unique for Skyfield don't have the prefix 'skf'.
-        # This is done to distinguish from cfg.satellites in this case)
-        skf_satellites = load.tle_file(output_tle_path)
 
-        # Verify that skf_satellites has the same number of elements as 'satellites' from config
-        if not len(skf_satellites) == len(cfg.satellites):
-            raise ValueError(f"There is a mismatch between the number of elements in 'skf_satellites' and 'cfg.satellites'. ({len(skf_satellites)} against {len(cfg.satellites)})")
+        #########################################################################################
+        # Pre-determine which TLE in TLE-series to use at any given time in the simulation span #
+        #########################################################################################
+        tle_epoch_series: list[Time] = []
+
+        # The TLE files are ensured to have the same Epochs through verification loops in 'generate_follower_tle_files(.)', 
+        # so the choice of skf satellite series doesn't really matter. The leader is selected beacuse element 0 is always defined.
+        leader_skf_satellite_series = all_skf_satellite_series[0]
+
+        # Extract epoch series from a series of EarthSatellite objects
+        for i, skf_sat in enumerate(leader_skf_satellite_series):
+            tle_epoch_series.append(skf_sat.epoch)
+
+        # Pre-determine TLE indecies at any given time
+        sat_tle_idx_at_times = self.generate_sat_tle_idx_at_times(times, tle_epoch_series)
 
 
         ####################################
         # Set SkyfieldSimulator attributes #
         ####################################
-
         self.cfg: Config = cfg
-        self.startTime: datetime = startTime
-        self.duration: int = duration
-        self.deltaT: int = deltaT
-        self.skf_satellites: list[EarthSatellite] = skf_satellites
+        self.times: list[Time] = times
+        self.sim_offset: NDArray[np.float64] = sim_offset
+        self.sat_tle_idx_at_times: list[int] = sat_tle_idx_at_times
+        self.all_skf_satellite_series: list[list[EarthSatellite]] = all_skf_satellite_series
+        self.satellite_names: list[str] = satellite_names
         self.sim_data: Optional[SimData] = None
-
+        # self.skf_satellites: list[EarthSatellite] = skf_satellites
+        
         logging.debug("Skyfield simulation setup complete")
-
 
 
     def run(self) -> None:
 
         logging.debug("Running the Skyfield simulation...")
-        
-        startTime = self.startTime
-        duration = self.duration
-        deltaT = self.deltaT
-        skf_satellites = self.skf_satellites
-        satellites = self.cfg.satellites
 
-        ########################
-        # Populate time-vector #
-        ########################
-        times_i = []
-        ts = load.timescale()
-        for t in range(0, duration, deltaT):
-            times_i.append(ts.utc(startTime + timedelta(seconds=t)))
-
-        # Convert to matplotlib-compatible simulation offset
-        sim_offset = self.skf_time_to_offset(times_i, startTime)
-        
-        
         #################################################################################
         # Run sgp4 propagation to get position and velocity at all simualtion timesteps #
         #################################################################################
         sim_data: list[SimObjData] = []
-
-        n_sats = len(skf_satellites)
-        n_t = len(times_i)
-        total_steps = n_sats * n_t
+        n_t = len(self.times)
+        total_steps = len(self.all_skf_satellite_series) * n_t
         current_step = 0
 
-        for i, skf_sat in enumerate(skf_satellites):
+        for i, skf_sat_series in enumerate(self.all_skf_satellite_series):
+            # TODO:
+            # Add checks to ensure we are iterating on the correct satellite
             # Verify that we are iterating over the satellites in the correct order
-            if not isinstance(skf_sat.name, str):
-                try:
-                    skf_sat_name = str(skf_sat.name)
-                except:
-                    raise TypeError(f"skf_sat.name is of type {type(skf_sat.name)}, and couldn't be converted to str")
-            else: 
-                skf_sat_name = str(skf_sat.name)
+            # if not isinstance(skf_sat.name, str):
+            #     try:
+            #         skf_sat_name = str(skf_sat.name)
+            #     except:
+            #         raise TypeError(f"skf_sat.name is of type {type(skf_sat.name)}, and couldn't be converted to str")
+            # else: 
+            #     skf_sat_name = str(skf_sat.name)
             
-            if not skf_sat_name == satellites[i].name:
-                raise NameError(f"There is a mismatch between the skf_satellites and the cfg.satellites. Satellite nr. {i} in skf_satellites is named {skf_sat.name} while the corresponding satellkite in cfg.satellites is named {satellites[i].name}")
+            # if not skf_sat_name == satellites[i].name:
+            #     raise NameError(f"There is a mismatch between the skf_satellites and the cfg.satellites. Satellite nr. {i} in skf_satellites is named {skf_sat.name} while the corresponding satellkite in cfg.satellites is named {satellites[i].name}")
             
-            # Pre-allocate for speed 
-            positions_eci = np.empty((len(times_i), 3), dtype=float)
-            velocities_eci = np.empty((len(times_i), 3), dtype=float)
+            skf_sat_name = self.satellite_names[i]
 
-            # Getting states in ECI frame
-            for j, t in enumerate(times_i):
+            # Pre-allocate for state matrices 
+            positions_eci = np.empty((len(self.times), 3), dtype=float)
+            velocities_eci = np.empty((len(self.times), 3), dtype=float)
+
+            # Getting states in ECI (ICRF) frame
+            for j, t in enumerate(self.times):
+                # Chose correct satellite in the satellite series
+                tle_idx = self.sat_tle_idx_at_times[j]
+                skf_sat = skf_sat_series[tle_idx]
+                
+                # Get states
                 positions_eci[j, :] = skf_sat.at(t).position.m
                 velocities_eci[j, :] = skf_sat.at(t).velocity.m_per_s
 
@@ -138,13 +172,13 @@ class SkyfieldSimulator():
 
             sim_object_data = SimObjData(
                 skf_sat_name,
-                sim_offset,
+                self.sim_offset,
                 positions_eci.T,
                 velocities_eci.T,
             )
 
             sim_data.append(sim_object_data)
-        
+
         # Set SkyfieldSimulator attribute sim_data
         self.sim_data = SimData(sim_data)
 
@@ -208,7 +242,52 @@ class SkyfieldSimulator():
             cfg.satellites[i].extract_initial_states_and_update(sat)
 
 
+    @staticmethod
+    def generate_sat_tle_idx_at_times(times: list[Time], tle_epoch_series: list[Time]) -> list[int]:
+        """
+        Generates a list that provides the TLE index at any time in times_i. \n
+        The index at time times_i[i] is chosen to correspond to the TLE with the Epoch closest to the given time
+        
+        Args:
+            tle_epoch_series (list[Time]): A list containing the Epochs extracted from the leader satellite's TLE file found in cfg.leader_tle_series_path
 
+        Returns:
+            sat_tle_idx_at_times (list[int]): A list that provides the index of the TLE that should be used at time times_i[i]
+        """
+        # Calculate midpoints and ensure tle_epoch_series is sorted in ascending order
+        num_epochs = len(tle_epoch_series)
+        midpoints: list[float] = []
+        for i in range(0, num_epochs-2):
+            curr_tle_epoch = tle_epoch_series[i]
+            next_tle_epoch = tle_epoch_series[i+1]
+
+            if not curr_tle_epoch.tt < next_tle_epoch.tt:
+                raise ValueError("'tle_epoch_series' is not sorted in ascending order. Indicates that the leader's TLE file in 'cfg.leader_tle_series_path' is not sorted by epoch.")
+            
+            midpoint = (curr_tle_epoch.tt + next_tle_epoch.tt) / 2
+            midpoints.append(midpoint)
+
+        # Generate list of which TLE index to use at any given time
+        sat_tle_idx_at_times: list[int] = []
+        sat_tle_idx = 0
+        next_midpoint_idx = 0
+        next_midpoint = midpoints[next_midpoint_idx]
+        for i, t in enumerate(times):
+            if t.tt >= next_midpoint:
+                next_midpoint_idx += 1
+                next_midpoint = midpoints[next_midpoint_idx]
+                sat_tle_idx += 1
+                sat_tle_idx_at_times.append(sat_tle_idx)
+            else:
+                sat_tle_idx_at_times.append(sat_tle_idx)
+
+        # Verify length
+        if not len(sat_tle_idx_at_times) == len(times):
+            raise ValueError("'sat_tle_idx_at_times' not the same length as 'times_i'")
+        
+        logging.debug("TLE series indecies pre-determined for all times in the simulation duration")
+
+        return sat_tle_idx_at_times
 
 
     @staticmethod
@@ -243,53 +322,6 @@ class SkyfieldSimulator():
         
         return skf_startTime, skf_duration, skf_deltaT
     
-    
-    @staticmethod
-    def create_tle_file(cfg: Config) -> str:
-        """
-        Creates/overwrites a .txt file containing all satellite TLEs from the default config.
-        Skyfield requries such a file for satellite object generation. 
-
-        Returns:
-            output_tle_path (str): The path to the generated tle file
-        """
-
-        logging.debug("Creating TLE .txt file from config")
-
-        satellites = cfg.satellites
-        tle_export_path = cfg.tle_export_path
-        output_tle_name = "gnss_r_tle.txt"
-        output_tle_path = os.path.join(tle_export_path, output_tle_name)
-        
-        # TODO: Check valid output_path
-
-        try:
-            # Validate or create directory specified in 'tle_export_path':
-            if not os.path.isdir(tle_export_path):
-                logging.info(f"Directory '{tle_export_path}' not found, attempting to create it.")
-                os.makedirs(tle_export_path, exist_ok=True)
-
-            # Write to output file:
-            with open(output_tle_path, "w") as f:
-                for i, sat in enumerate(satellites):
-                    tle_name = sat.name
-                    tle_line1 = sat.tle_line1
-                    tle_line2 = sat.tle_line2
-
-                    f.write(f"{tle_name}\n{tle_line1}\n{tle_line2}\n")
-
-            # Validate output:
-            if not os.path.isfile(output_tle_path):
-                raise FileNotFoundError(f"Failed to create file at '{output_tle_path}'.")
-            if os.path.getsize(output_tle_path) == 0:
-                raise IOError(f"TLE file '{output_tle_path}' was created but is empty.")
-            
-            return output_tle_path
-
-
-        except Exception as e:
-            raise ValueError(f"Error while creating TLE file: {e}")
-
 
     @staticmethod
     def skf_time_to_offset(skf_time_vec: list[Time],

@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 
 from object_definitions.Config_def import Config
-from object_definitions.SimData_def import SimData, SimObjData, DATA_SAVE_FOLDER_PATH
+from object_definitions.SimData_def import SimData, SimObjData, OUTPUT_DATA_SAVE_DIR
 
 
 class DataLoader:
@@ -27,7 +27,7 @@ class DataLoader:
 
         # normalize filename and build path
         fname = filename if filename.endswith(".h5") else f"{filename}.h5"
-        file_path = DATA_SAVE_FOLDER_PATH / fname
+        file_path = OUTPUT_DATA_SAVE_DIR / fname
         if not file_path.exists():
             raise FileNotFoundError(f"HDF5 file not found: {file_path}")
 
@@ -159,7 +159,7 @@ class DataLoader:
     @ staticmethod
     def get_datafiles_by_timestamp(timestamp: str) -> list[str]:
         """
-        Return the full filenames (str) of all .h5 files in DATA_SAVE_FOLDER_PATH
+        Return the full filenames (str) of all .h5 files in OUTPUT_DATA_SAVE_DIR
         whose filename starts with the given timestamp.
 
         Args:
@@ -168,12 +168,12 @@ class DataLoader:
         Returns:
             list[str]: A list of matching full filenames.
         """
-        if not isinstance(DATA_SAVE_FOLDER_PATH, Path):
-            raise TypeError("DATA_SAVE_FOLDER_PATH must be a pathlib.Path object.")
+        if not isinstance(OUTPUT_DATA_SAVE_DIR, Path):
+            raise TypeError("OUTPUT_DATA_SAVE_DIR must be a pathlib.Path object.")
 
         # Collect all matching .h5 files and return their names as strings
         matching_files = [
-            file.name for file in DATA_SAVE_FOLDER_PATH.glob(f"{timestamp}*.h5")
+            file.name for file in OUTPUT_DATA_SAVE_DIR.glob(f"{timestamp}*.h5")
         ]
 
         if matching_files == []:

@@ -11,7 +11,6 @@ def initialize(config_file_path) -> Config:
     ==========================================================================================================
     1. Configure logging format
     2. Initialize global config instance
-    3. I suspect getting initial state vectors for the satellites will be next...
     ==========================================================================================================
     """
     # Configure debug logging format

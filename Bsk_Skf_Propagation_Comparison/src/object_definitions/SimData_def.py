@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
 # Global definition of data save folder path
-DATA_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
+OUTPUT_DATA_SAVE_DIR = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
 
 
 @dataclass_json
@@ -74,7 +74,7 @@ class SimData:
     
     def write_data_to_file(self, timestamp_str: str, sim_type: str) -> None:
         """
-        Saves the simulation data to DATA_SAVE_FOLDER_PATH/<filename>.h5
+        Saves the simulation data to OUTPUT_DATA_SAVE_DIR/<filename>.h5
         The output data file will have the following structure:
 
         /time           (1,n)
@@ -84,13 +84,13 @@ class SimData:
                 vel     (3,n)
         """
         # Ensure target directory exists
-        DATA_SAVE_FOLDER_PATH.mkdir(parents=True, exist_ok=True)
+        OUTPUT_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
         # Generate time dependant filename 
         filename = self.create_data_filename(timestamp_str, sim_type)
 
         # Construct full file path
-        file_path = DATA_SAVE_FOLDER_PATH / f"{filename}.h5"
+        file_path = OUTPUT_DATA_SAVE_DIR / f"{filename}.h5"
         
         # Get simulation time vector
         time = self.extract_time_vec()
