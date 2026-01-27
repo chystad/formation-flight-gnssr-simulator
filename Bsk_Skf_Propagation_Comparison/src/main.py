@@ -43,6 +43,7 @@ if __name__ == "__main__":
 """
 * Merge config files into one
 * Fix the creation of common Satellite objects that are compatible with both the new config structure and TLE-handeling
+* Write a method in TLE that extracts the satellite name from a TLE series
 
 
 Simulator Misk:

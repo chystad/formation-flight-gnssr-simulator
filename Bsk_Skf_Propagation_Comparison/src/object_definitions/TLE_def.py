@@ -1,27 +1,36 @@
 import logging
 from pathlib import Path
 
-from object_definitions.Config_def import Config
-
+# Global definition of TLE output directory 
 FOLLOWER_TLE_OUTPUT_DIR = Path("Bsk_Skf_Propagation_Comparison/output_data/follower_tle_files")
-
 
 class TLE:
     """
     Contains methods to help parse, process and modify TLE files
     """
 
-    def __init__(self) -> None:
+    def __init__(self,
+                 satellite_param_path: str,
+                 leader_tle_series_path: str,
+                 inplane_separation_ang: float,
+                 num_satellites: int) -> None:
+        
+        # Initialize flag
         verified_leader_TLE_series_file: bool = False
 
+        # Set instance attributes
+        self.satellite_param_path = satellite_param_path
+        self.leader_tle_series_path = leader_tle_series_path
+        self.inplane_separation_ang = inplane_separation_ang
+        self.num_satellites = num_satellites
         self.verified_leader_TLE_series_file = verified_leader_TLE_series_file
         pass
 
 
-    def generate_follower_tle_files(self, cfg: Config) -> list[str]:
+    def generate_follower_tle_files(self) -> list[str]:
         """
         Generate TLE series files for follower satellites by copying the leader TLE series
-        and shifting mean anomaly by i*cfg.inplane_separation_ang for follower i (1-indexed).
+        and shifting mean anomaly by i*self.inplane_separation_ang for follower i (1-indexed).
         The method also performs verification of any existing TLE files
 
         Output files:
@@ -34,7 +43,7 @@ class TLE:
         verified_follower_tles = False # if True: follower TLE file(s) verified -> No need to generate new files
         out_follower_tle_paths: list[Path] = [] # Used for internal operations
         out_follower_tle_str_paths: list[str] = [] # Return variable
-        num_followers = int(cfg.num_satellites) - 1
+        num_followers = int(self.num_satellites) - 1
 
         # If no followers, don't generate files and return empty out_file_paths
         if num_followers <= 0:
@@ -53,7 +62,7 @@ class TLE:
         # Try to verify all existing follower TLE files, if they exist
         tle_verified = False
         for i, tle_path in enumerate(out_follower_tle_paths):
-            tle_verified = self.verify_follower_TLE_series_file(cfg, tle_path)
+            tle_verified = self.verify_follower_TLE_series_file(tle_path)
             if not tle_verified:
                 break
         if tle_verified:
@@ -66,8 +75,8 @@ class TLE:
         
         # Generate new TLE files for all followers
         else:
-            sep_ang_deg = float(cfg.inplane_separation_ang)
-            leader_path = Path(cfg.leader_tle_series_path)
+            sep_ang_deg = self.inplane_separation_ang
+            leader_path = Path(self.leader_tle_series_path)
             
             # Read leader TLE series file
             with leader_path.open("r", encoding="utf-8") as f:
@@ -212,7 +221,7 @@ class TLE:
                             correct_sorting: {correct_sorting}""")
 
 
-    def verify_follower_TLE_series_file(self, cfg: Config, follower_tle_path: Path) -> bool:
+    def verify_follower_TLE_series_file(self, follower_tle_path: Path) -> bool:
         """
         Verifies the follower TLE series file. 
         If 'True' is returned, the follower TLE file can be used for this simulation run.
@@ -230,7 +239,7 @@ class TLE:
         exists = False
         correct_structure_n_data = False
 
-        leader_path = Path(cfg.leader_tle_series_path)
+        leader_path = Path(self.leader_tle_series_path)
 
         # Make sure the leader TLE series file has been verified
         if not self.verified_leader_TLE_series_file:
@@ -291,7 +300,7 @@ class TLE:
         leader_epoch_keys: list[tuple[int, float]] = []
         follower_epoch_keys: list[tuple[int, float]] = []
 
-        sep_deg = float(cfg.inplane_separation_ang)
+        sep_deg = self.inplane_separation_ang
         shift_deg = follower_i * sep_deg
 
         for b in range(0, len(leader_raw), 3):
@@ -368,7 +377,6 @@ class TLE:
 
         correct_structure_n_data = True
 
-
         # Once the TLE files are verified, log confirmation
         if exists and correct_structure_n_data:
             logging.debug(f"Verified follower TLE series file (Path: {follower_tle_path})")
@@ -376,6 +384,38 @@ class TLE:
         else:
             logging.debug(f"Follower TLE series file (Path: {follower_tle_path}) failed verification. New follower TLE file(s) must be generated...")
             return False
+        
+    
+    def extract_satellite_name_from_TLE(self, tle_path: Path) -> str:
+        """
+        Returns a satellite name from TLE series file if all names in the file are the same. Raises ValueError otherwise
+        """
+        try:
+            with tle_path.open("r", encoding="utf-8") as f:
+                    raw_lines = f.readlines()
+        except:
+            raise ValueError(f"Failed to open TLE file at (Path: {tle_path})")
+        
+        # Extract all names
+        names: list[str] = []
+
+        for b in range(0, len(raw_lines), 3):
+            name = self._strip_newline(raw_lines[b]).strip()
+
+            # Name must exist (non-empty)
+            if not name:
+                raise ValueError(f"Empty satellite name at block starting line {b+1}")
+
+            names.append(name)
+
+         # All names identical check
+        first_name = names[0]
+        if any(n != first_name for n in names):
+            raise ValueError(
+                f"TLE series contains multiple names. Expected all names to match '{first_name}', but got: {sorted(set(names))}"
+            )
+        
+        return first_name
 
 
     @staticmethod

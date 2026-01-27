@@ -8,27 +8,9 @@ from datetime import datetime
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
+from object_definitions.TLE_def import TLE
 from object_definitions.Satellite_def import Satellite
-from object_definitions.TwoLineElement_def import TLE
 from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
-
-"""
-=========================================================================================================
-Overview of classes and their methods with high-level functionality
-
-Config
-    __init__:       Initializes the Config instance with global config parameters that 
-                      apply to all simulations
-    read:           Reads the config file using yaml.full_load
-
-BasiliskConfig
-    __init__:       Initializes the BasiliskConfig instance with config parameters that 
-                      only apply to th basilisk simualtion framework
-
-SkyfiledConfig:
-    __init__:
-=========================================================================================================
-"""
 
 
 @dataclass_json
@@ -119,25 +101,30 @@ class Config:
         skf_deltaT = s_cfg['SKYFIELD_SIMULATION']['deltaT']
 
         # Create Satellite intstances
-        # satellites = self.generate_satellite_instances_from_config(d_cfg)
+        satellites = self.generate_satellite_instances_from_config(
+            satellite_param_path, 
+            leader_tle_series_path, 
+            inplane_separation_ang, 
+            num_satellites
+        )
         
         ##############################
         # Assign instance attributes #
         ##############################
-        self.startTime = startTime_str
-        self.simulationDuration = simulationDuration
-        self.use_old_skf_data = use_old_skf_data
-        self.old_skf_data_timestamp = old_skf_data_timestamp
-        self.show_plots = show_plots
-        self.save_plots = save_plots
-        self.bypass_sim_to_plot = bypass_sim_to_plot
-        self.data_timestamp_to_plot = data_timestamp_to_plot
-        self.satellite_param_path = satellite_param_path
-        self.leader_tle_series_path = leader_tle_series_path
-        self.inplane_separation_ang = inplane_separation_ang
-        self.num_satellites = num_satellites
+        self.startTime: str = startTime_str
+        self.simulationDuration: float = simulationDuration
+        self.use_old_skf_data: bool = use_old_skf_data
+        self.old_skf_data_timestamp: str = old_skf_data_timestamp
+        self.show_plots: bool = show_plots
+        self.save_plots: bool = save_plots
+        self.bypass_sim_to_plot: bool = bypass_sim_to_plot
+        self.data_timestamp_to_plot: str = data_timestamp_to_plot
+        self.satellite_param_path: str = satellite_param_path
+        self.leader_tle_series_path: str = leader_tle_series_path
+        self.inplane_separation_ang: float = inplane_separation_ang
+        self.num_satellites: int = num_satellites
         self.timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-        # self.satellites = satellites
+        self.satellites: list[Satellite] = satellites
 
         # Assign BasiliskSettings instance to b_set attribute
         self.b_set = BasiliskSettings(
@@ -226,100 +213,73 @@ class Config:
             f_out.write(combined_text)
 
         logging.info(f"Combined config written to: {out_path}")
-    
-        
-    
-    @staticmethod
-    def generate_satellite_instances_from_config(loaded_default_cfg) -> list[Satellite]:
+
+
+    def generate_satellite_instances_from_config(self, 
+                                                 satellite_param_path: str,
+                                                 leader_tle_series_path: str,
+                                                 inplane_separation_ang: float,
+                                                 num_satellites: int) -> list[Satellite]:
         """
-        TODO: Write docstring...
+        Generates a list of Satellite objects that acts like a common reference for both the Skyfield and Basilisk simulations.
+        The number of satellites are defined by 'num_satellites' in default.yaml, 
+        while the individual physical satellite parameters comes from the 'shared_input_data' folder
+
+        Returns:
+            (list[Satellite]): A list of num_satellites Satellite instances
         """
 
-        def _parse_inital_states_from_config(initial_pos: str, initial_vel: str) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-            # [DEPRECIATED AS OF 23.10]
-            """
-            INPUT:
-                initial_pos             3 element initial satellite position list. Elements can be str, int or float
-                initial_vel             3 element initial satellite velocity list. Elements can be str, int or float
+        # Read satellite parameters from shared_input_data
+        loaded_sat_param = self.read(satellite_param_path)  
 
-            OUTPUT:
-                parsed_ndarray_pos      3 element np.array position vector 
-                parsed_ndarray_vel      3 element np.array velocity vector 
-            """
-            
+        # Create 'num_satellites' Satellite instances
+        all_sat_param = loaded_sat_param['SATELLITES']
 
-            if len(initial_pos) != 3 or len(initial_vel) != 3:
-                raise ValueError("Wrong number of elements in 'initial_pos' or 'initial_vel' from default.yaml")
-            
-            parsed_pos = [_parse_element(x) for x in initial_pos]
-            parsed_vel = [_parse_element(v) for v in initial_vel]
+        # Check if parameters have been defined for enough satellites
+        if len(all_sat_param) < num_satellites:
+            raise ValueError(f"There has only been defined parameters for ({len(all_sat_param)}) satellites, while default.yaml specifies ({num_satellites}) satellites total.")
 
-            parsed_ndarray_pos = np.array(parsed_pos, dtype=float)
-            parsed_ndarray_vel = np.array(parsed_vel, dtype=float)
-            
-            #parsed_initial_state = np.array(parsed_pos + parsed_vel, dtype=float)
-
-            return parsed_ndarray_pos, parsed_ndarray_vel
-        
-
-        def _parse_element(val) -> float:
-            """
-            Parse input value from type str or int to type float that can later be used in np.array([], dtype=float)
-            """
-            if isinstance(val, str):
-                try:
-                    return float(val.replace("E", "e"))
-                except:
-                    raise ValueError(f"Invalid numeric string: {val}")
-            elif isinstance(val, (float, int)):
-                return float(val)
-            else:
-                raise TypeError(f"Unsupported type {type(val)} for element {val}")
-
-
-
-        # Use raw config for satellite information
-        all_sat_info = loaded_default_cfg['SATELLITES']
-        
-        satellite: Satellite
+        leader_path = Path(leader_tle_series_path)
+        sat_it: int = 0
         satellites: list[Satellite] = []
-        for sat, sat_info in all_sat_info.items():
-            # Check if all satellite attributes are compatible with the Satellite object
-            allowed = {'name', 'tle_line1', 'tle_line2', 'm_s', 'C_D', 'A_D', 'C_R', 'A_srp'} # NOTE: This must be updated of the config-format changes!
-            unknown = set(sat_info) - allowed
-            if unknown:
-                raise ValueError(f"{sat}: unknown keys for {unknown}")
-            
-            # Extract tle strings
-            tle_line1 = sat_info['tle_line1']
-            tle_line2 = sat_info['tle_line2']
-            
-            # Generate TLE instance from tle lines
-            tle = TLE(
-                tle_line1,
-                tle_line2
-            )
-            
-            # Create Satellite instance form current config satellite
+        tle_processor = TLE(
+            satellite_param_path,
+            leader_tle_series_path,
+            inplane_separation_ang,
+            num_satellites
+        )
+        for sat_role, sat_param in all_sat_param.items():
+            if isinstance(sat_role, str):
+                # Extract/Generate a satellite name
+                if sat_role == "leader":
+                    sat_name = tle_processor.extract_satellite_name_from_TLE(leader_path)
+
+                elif (sat_role.startswith("follower-")) and (sat_it > 0):
+                    sat_name = f"follower-{sat_it}"
+
+                else: 
+                    raise ValueError(f"Received satellite role: ({sat_role}), but expected: (leader) or (follower-X)")
+            else:
+                raise ValueError("Satellite parameter keys are not strings")
+
+            # Create Satellite instance form current satellite name and parameters
             satellite = Satellite(
-                sat_info['name'],
-                tle_line1,
-                tle_line2,
-                tle,
-                m_s = sat_info['m_s'],
-                C_D = sat_info['C_D'],
-                A_D = sat_info['A_D'],
-                C_R = sat_info['C_R'],
-                A_srp = sat_info['A_srp'],
+                sat_name,
+                m_s = sat_param['m_s'],
+                C_D = sat_param['C_D'],
+                A_D = sat_param['A_D'],
+                C_R = sat_param['C_R'],
+                A_srp = sat_param['A_srp'],
                 init_pos = None, # This field will be populated by data from skyfield later
                 init_vel = None  # This field will be populated by data from skyfield later
             )
-            
-            logging.debug(f"Appending {sat_info['name']} to 'satellites'")
+
+            logging.debug(f"Appending {sat_name} to 'satellites'")
             satellites.append(satellite)
 
+            # Check exit condition
+            sat_it += 1
+            if sat_it >= num_satellites:
+                break
+
         return satellites
-        
-
-
-        

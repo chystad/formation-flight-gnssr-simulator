@@ -5,6 +5,8 @@
 #   C_R:          Radiation pressure coefficient
 #   A_srp:  [m^2] Cross-section area perpendicular to thhe Sun-vector
 
+# NOTE: Satellite names must be 'leader', followed by 'follower-1', 'follower-2', etc.
+
 SATELLITES:
   leader:
     m_s: 6.0
@@ -19,6 +21,12 @@ SATELLITES:
     C_R: 1.21 
     A_srp: 0.06
   follower-2:
+    m_s: 6.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+  follower-3:
     m_s: 6.0
     C_D: 2.2
     A_D: 0.06

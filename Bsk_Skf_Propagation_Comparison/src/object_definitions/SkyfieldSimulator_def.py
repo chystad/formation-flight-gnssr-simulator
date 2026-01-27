@@ -57,11 +57,16 @@ class SkyfieldSimulator():
         # Verify and Create TLE file(s) #
         #################################
         leader_tle_path = Path(cfg.leader_tle_series_path)
-        tle_processor = TLE()
+        tle_processor = TLE(
+            cfg.satellite_param_path,
+            cfg.leader_tle_series_path,
+            cfg.inplane_separation_ang,
+            cfg.num_satellites
+        )
         tle_processor.verify_leader_TLE_series_file(leader_tle_path)
 
         # Generate a TLE file for each follower and get their output paths
-        tle_paths = tle_processor.generate_follower_tle_files(cfg)
+        tle_paths = tle_processor.generate_follower_tle_files()
 
         # Insert the leader TLE file to get a comprehensive list of all TLE file paths
         tle_paths.insert(0, cfg.leader_tle_series_path)
@@ -119,7 +124,6 @@ class SkyfieldSimulator():
         self.all_skf_satellite_series: list[list[EarthSatellite]] = all_skf_satellite_series
         self.satellite_names: list[str] = satellite_names
         self.sim_data: Optional[SimData] = None
-        # self.skf_satellites: list[EarthSatellite] = skf_satellites
         
         logging.debug("Skyfield simulation setup complete")
 
@@ -132,26 +136,18 @@ class SkyfieldSimulator():
         # Run sgp4 propagation to get position and velocity at all simualtion timesteps #
         #################################################################################
         sim_data: list[SimObjData] = []
+        cfg_satellites = self.cfg.satellites
         n_t = len(self.times)
         total_steps = len(self.all_skf_satellite_series) * n_t
         current_step = 0
 
         for i, skf_sat_series in enumerate(self.all_skf_satellite_series):
-            # TODO:
-            # Add checks to ensure we are iterating on the correct satellite
-            # Verify that we are iterating over the satellites in the correct order
-            # if not isinstance(skf_sat.name, str):
-            #     try:
-            #         skf_sat_name = str(skf_sat.name)
-            #     except:
-            #         raise TypeError(f"skf_sat.name is of type {type(skf_sat.name)}, and couldn't be converted to str")
-            # else: 
-            #     skf_sat_name = str(skf_sat.name)
-            
-            # if not skf_sat_name == satellites[i].name:
-            #     raise NameError(f"There is a mismatch between the skf_satellites and the cfg.satellites. Satellite nr. {i} in skf_satellites is named {skf_sat.name} while the corresponding satellkite in cfg.satellites is named {satellites[i].name}")
-            
+            # Ensure that the expected Skyfield satellite is propagated
             skf_sat_name = self.satellite_names[i]
+            cfg_sat_name = cfg_satellites[i].name
+
+            if not skf_sat_name == cfg_sat_name:
+                raise ValueError(f"Iterated Skyfield EarthSatellite name ({skf_sat_name}) is not the same as the iterated config Satellite name ({cfg_sat_name}).")
 
             # Pre-allocate for state matrices 
             positions_eci = np.empty((len(self.times), 3), dtype=float)

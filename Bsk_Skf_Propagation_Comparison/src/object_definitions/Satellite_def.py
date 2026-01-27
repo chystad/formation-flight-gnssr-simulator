@@ -3,21 +3,13 @@ import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
 
-from object_definitions.TwoLineElement_def import TLE
 from object_definitions.SimData_def import SimObjData
-
-# from Basilisk.simulation import spiceInterface # For basilsk time format
-
-
 
 
 class Satellite:
     def __init__(
             self,
             name: str,
-            tle_line1: str,
-            tle_line2: str,
-            tle: TLE,
             m_s: float, # [kg] Satellite mass
             C_D: float, # Drag coefficient
             A_D: float, # [m^2] Cross-section area perpendicular to the velocity
@@ -33,32 +25,18 @@ class Satellite:
         
         ATTRIBUTES:
             name:               Satellite name 'str'
-            id:                 TODO
-            tle_line1
-            tle_line2
-            tle:                TLE instance conatining all information from the satellite's tl
-            custom_init_pos     Optional initial position vector. Only used if 'use_custom_initial_state' == true
-            custom_init_vel     Optional initial velocity vector. Only used if 'use_custom_initial_state' == true
         ==========================================================================================================
         """
             
         # Assign attribute values 
-        # # TODO define correct attribute typings
         self.name: str = name
-        self.tle_line1: str = tle_line1
-        self.tle_line2: str = tle_line2
-        self.tle: TLE = tle
-        self.m_s = m_s
-        self.C_D = C_D
-        self.A_D = A_D
-        self.C_R = C_R
-        self.A_srp = A_srp
+        self.m_s: float = m_s
+        self.C_D: float = C_D
+        self.A_D: float = A_D
+        self.C_R: float= C_R
+        self.A_srp: float = A_srp
         self.init_pos: Optional[NDArray[np.float64]] = init_pos
         self.init_vel: Optional[NDArray[np.float64]] = init_vel
-
-
-    def create_unique_id(self):
-        pass
 
 
     def extract_initial_states_and_update(self, sim_object_data: SimObjData) -> None:
