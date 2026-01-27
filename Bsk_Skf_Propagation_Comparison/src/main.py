@@ -41,10 +41,8 @@ if __name__ == "__main__":
 
 # TODO
 """
-* Merge config files into one
-* Fix the creation of common Satellite objects that are compatible with both the new config structure and TLE-handeling
-* Write a method in TLE that extracts the satellite name from a TLE series
-
+* [Optional] Merge config files into one 
+* [Optional] Optimize the Skyfield simulation by editing SkyfieldSimulator.run() to call sat.at(times_segment) in a batch 
 
 Simulator Misk:
 * To Master: Enable the option to queue multiple simulation runs with different configurations

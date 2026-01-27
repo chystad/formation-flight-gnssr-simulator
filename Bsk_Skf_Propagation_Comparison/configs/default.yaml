@@ -1,7 +1,7 @@
 # Global simulation configuration settings
 SIMULATION:
   startTime: "01.01.2026 04:45:41" # UTC time. TODO: Remove, and implement automatic detection of start time based on first TLE Epoch
-  simulationDuration: 6 # hours TODO: Add functionality that raises a warning if the duration is far beyond the last TLE's epoch
+  simulationDuration: 24 # hours TODO: Add functionality that raises a warning if the duration is far beyond the last TLE's epoch
   use_old_skf_data: false # Skip Skyfield simulation (used when you want to use the same SGP4 baseline to compare against multiple Basilisk runs)
   old_skf_data_timestamp: "20251216_110041" # Timestamp WITHOUT "_skf" at the end
 

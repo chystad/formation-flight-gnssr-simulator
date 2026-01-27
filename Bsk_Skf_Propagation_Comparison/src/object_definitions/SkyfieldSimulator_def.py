@@ -160,8 +160,9 @@ class SkyfieldSimulator():
                 skf_sat = skf_sat_series[tle_idx]
                 
                 # Get states
-                positions_eci[j, :] = skf_sat.at(t).position.m
-                velocities_eci[j, :] = skf_sat.at(t).velocity.m_per_s
+                g = skf_sat.at(t)
+                positions_eci[j, :] = g.position.m
+                velocities_eci[j, :] = g.velocity.m_per_s
 
                 current_step += 1
                 self.print_progress(current_step, total_steps)
@@ -250,10 +251,14 @@ class SkyfieldSimulator():
         Returns:
             sat_tle_idx_at_times (list[int]): A list that provides the index of the TLE that should be used at time times_i[i]
         """
-        # Calculate midpoints and ensure tle_epoch_series is sorted in ascending order
+        # Only use the first TLE if there is only one available
         num_epochs = len(tle_epoch_series)
+        if num_epochs == 1:
+            return [0] * len(times)
+
+        # Calculate midpoints and ensure tle_epoch_series is sorted in ascending order
         midpoints: list[float] = []
-        for i in range(0, num_epochs-2):
+        for i in range(0, num_epochs-1):
             curr_tle_epoch = tle_epoch_series[i]
             next_tle_epoch = tle_epoch_series[i+1]
 
@@ -268,18 +273,23 @@ class SkyfieldSimulator():
         sat_tle_idx = 0
         next_midpoint_idx = 0
         next_midpoint = midpoints[next_midpoint_idx]
+        last_midpoint_reached = False
         for i, t in enumerate(times):
-            if t.tt >= next_midpoint:
-                next_midpoint_idx += 1
-                next_midpoint = midpoints[next_midpoint_idx]
+            if t.tt >= next_midpoint and not last_midpoint_reached:
+                if next_midpoint_idx < (len(midpoints)-1):
+                    next_midpoint_idx += 1
+                    next_midpoint = midpoints[next_midpoint_idx]
+                else:
+                    last_midpoint_reached = True
                 sat_tle_idx += 1
+                sat_tle_idx = min(sat_tle_idx, num_epochs - 1) # Avvoid out-of-range 
                 sat_tle_idx_at_times.append(sat_tle_idx)
             else:
                 sat_tle_idx_at_times.append(sat_tle_idx)
 
         # Verify length
         if not len(sat_tle_idx_at_times) == len(times):
-            raise ValueError("'sat_tle_idx_at_times' not the same length as 'times_i'")
+            raise ValueError("'sat_tle_idx_at_times' not the same length as 'times'")
         
         logging.debug("TLE series indecies pre-determined for all times in the simulation duration")
 
