@@ -10,7 +10,6 @@ class TLE:
     """
 
     def __init__(self,
-                 satellite_param_path: str,
                  leader_tle_series_path: str,
                  inplane_separation_ang: float,
                  num_satellites: int) -> None:
@@ -19,7 +18,6 @@ class TLE:
         verified_leader_TLE_series_file: bool = False
 
         # Set instance attributes
-        self.satellite_param_path = satellite_param_path
         self.leader_tle_series_path = leader_tle_series_path
         self.inplane_separation_ang = inplane_separation_ang
         self.num_satellites = num_satellites

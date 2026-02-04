@@ -1,5 +1,5 @@
 import os
-import shutil # For therminal width
+import shutil # For terminal width
 import logging
 import numpy as np
 from pathlib import Path
@@ -58,7 +58,6 @@ class SkyfieldSimulator():
         #################################
         leader_tle_path = Path(cfg.leader_tle_series_path)
         tle_processor = TLE(
-            cfg.satellite_param_path,
             cfg.leader_tle_series_path,
             cfg.inplane_separation_ang,
             cfg.num_satellites

@@ -1,18 +1,19 @@
 import os
 import logging
 import numpy as np
-from typing import Optional, Any
+from typing import Optional, Any, Union
 from numpy.typing import NDArray
 from datetime import datetime, timezone
 
-# from object_definitions.BaseSimulator_def import BaseSimulator
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
 
 from Basilisk import __path__
+# always import the Basilisk messaging support
+from Basilisk.architecture import messaging
 from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
-                                exponentialAtmosphere, dragDynamicEffector, svIntegrators)
+                                exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, svIntegrators)
 from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion,
                                 simIncludeGravBody, unitTestSupport, vizSupport)
 
@@ -30,12 +31,15 @@ class BasiliskSimulator:
     =========================================================================================================
     ATTRIBUTES:
         cfg             Config instance
+        integrators     
         simTaskName     Simulation task name (str)
         scSim           Simulation module container
         scObjects       List containing all simulation objects (satellites)
         scRecorders   List containing all simulation recorders (one for each scObject)
         sim_data        Object containing the simulaton output data (Optional[SimData])
         sunRec          Sun state recorder
+        msisSwMsgList   
+        msisSwMsgDict   Dictionary containing the MSIS atmosphere model
     =========================================================================================================
     """
     def __init__(self, cfg: Config) -> None:
@@ -68,8 +72,12 @@ class BasiliskSimulator:
         # Set sample time (same as 'deltaT' in basilisk simulation config)
         samplingTime = unitTestSupport.samplingTime(simulationDuration, simulationTimeStep, numDataPoints)
 
-        # Initialize integrators
+        # Initialize integrator list to prevent it being CE'ed
         self.integrators = []
+
+        # Initialize MSIS atmosphere message list and dictionary to prevent it being CE'ed
+        self.msisSwMsgList = []
+        self.msisSwMsgDict = {}
 
         # path to basilisk. Used to fetch predesigned models
         bskPath = __path__[0]
@@ -138,7 +146,7 @@ class BasiliskSimulator:
             # Initialize spacecraft object
             scObj = spacecraft.Spacecraft()
             scObj.ModelTag = sat.name
-            scObj.hub.mHub = getattr(sat, "m_s", 6.0)
+            scObj.hub.mHub = sat.m_s # getattr(sat, "m_s", 6.0)
 
             # Add spacecraft object to the simulation process
             self.scSim.AddModelToTask(self.simTaskName, scObj)
@@ -219,14 +227,7 @@ class BasiliskSimulator:
         # Note that this module simulates both the translational and rotational motion of the spacecraft.
         # In this scenario only the translational (i.e. orbital) motion is tracked.  This means the rotational motion
         # remains at a default inertial frame orientation in this scenario.  There is no appreciable speed hit to
-        # simulate both the orbital and rotational motion for a single rigid body.  In the later scenarios
-        # the rotational motion is engaged by specifying rotational initial conditions, as well as rotation
-        # related effectors.  In this simple scenario only translational motion is setup and tracked.
-        # Further, the default spacecraft parameters, such as the unit mass and the principle inertia values are
-        # just fine for this orbit simulation as they don't impact the orbital dynamics in this case.
-        # This is true for all gravity force only orbital simulations. Later
-        # tutorials, such as scenarioAttitudeFeedback.py,
-        # illustrate how to over-ride default values with desired simulation values.
+        # simulate both the orbital and rotational motion for a single rigid body.
 
         # Make configs easily accessible
         d_set = self.cfg        # default config
@@ -366,31 +367,105 @@ class BasiliskSimulator:
         return gravFactory, spiceObj
 
 
-    def conditional_atmosphere_init(self) -> Optional[exponentialAtmosphere.ExponentialAtmosphere]:
+    def conditional_atmosphere_init(self) -> Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, msisAtmosphere.MsisAtmosphere]]:
+        """
+        Initialize and schedula an atmosphere model if it has been configured to do so by the config file:
+
+        Priority:
+            1) Initialize the MSIS model if 'cfg.b_set.useMsisDrag' == True
+            2) Initialize the Exponential density model if 'cfg.b_set.useExponentialDensityDrag' == True
+
+        Returns:
+            Atmosphere instance, or None if an atmosphere model hasn't been initialized.
+        """
+        
+        use_msis = self.cfg.b_set.useMsisDrag
+        use_exp = self.cfg.b_set.useExponentialDensityDrag            
+
+        # Using MSIS atmosphere model (NRLMSISE-00)
+        if use_msis:
+            # Initialize MsisAtmosphere instance
+            atm = msisAtmosphere.MsisAtmosphere()
+            atm.ModelTag = "msisAtm"
+            
+            # Manually extracted data for sim time = 01.01.2026 01:00:00
+            # ap1: 00:00–03:00
+            # ap2: 03:00–06:00
+            # ap3: 06:00–09:00
+            # ap4: 09:00–12:00
+            # ap5: 12:00–15:00
+            # ap6: 15:00–18:00
+            # ap7: 18:00–21:00
+            # ap8: 21:00–24:00
+            sw_msg = {
+                "ap_24_0": 7,   # avg of [ap1(01.01.2026),  ap2(31.12.2025)] (last 8 3-hour segments, including current 3-hour window)
+                "ap_3_0": 7,    # ap1(01.01.2026)
+                "ap_3_-3": 4,   # ap8(31.12.2025)
+                "ap_3_-6": 4,   # ap7(31.12.2025)
+                "ap_3_-9": 5,   # ap6(31.12.2025)
+                "ap_3_-12": 18, # ap5(31.12.2025)
+                "ap_3_-15": 6,  # ap4(31.12.2025)
+                "ap_3_-18": 7,  # ap3(31.12.2025)
+                "ap_3_-21": 5,  # ap2(31.12.2025)
+                "ap_3_-24": 7,  # ap1(31.12.2025)
+                "ap_3_-27": 4,  # ap8(30.12.2025)
+                "ap_3_-30": 7,  # ap7(30.12.2025)
+                "ap_3_-33": 12, # ap6(30.12.2025)
+                "ap_3_-36": 15, # ap5(30.12.2025)
+                "ap_3_-39": 5,  # ap4(30.12.2025)
+                "ap_3_-42": 6,  # ap3(30.12.2025)
+                "ap_3_-45": 6,  # ap2(30.12.2025)
+                "ap_3_-48": 5,  # ap1(30.12.2025)
+                "ap_3_-51": 7,  # ap8(29.12.2025)
+                "ap_3_-54": 2,  # ap7(29.12.2025)
+                "ap_3_-57": 4,  # ap6(29.12.2025)
+                "f107_1944_0": 150, # f107adj avg of last 81 days [f107adj(01.01.2026),  f107adj(13.10.2025)] (value guessed here)
+                "f107_24_-24": 164.8 # f107adj(31.12.2025) day avg for the previous day 
+            } 
+            swMsgList = []
+            for c, val in enumerate(sw_msg.values()):
+                swMsgData = messaging.SwDataMsgPayload(dataValue=val)
+                swMsgList.append(messaging.SwDataMsg().write(swMsgData))
+                atm.swDataInMsgs[c].subscribeTo(swMsgList[-1])
+
+            # Keep a reference message so it doesn't get CE'ed
+            self.msisSwMsgDict = sw_msg
+            self.msisSwMsgList = swMsgList
+
+            logging.debug("MSIS atmosphere model has been initialized")
+
+
+        # Using Exponential density atmosphere
+        elif use_exp:
+            # Initialize ExponentialAtmosphere object
+            atm = exponentialAtmosphere.ExponentialAtmosphere()
+            atm.ModelTag = "expAtm"
+
+            # Exponential atmosphere parameters
+            atm.planetRadius = 6378136.6    # [m] WGS-84 equatorial radius
+            atm.scaleHeight = 15180.0       # [m] typical scale height (7200 before tuning)
+            atm.baseDensity = 1.225         # [kg/m^3] density at 0 m
+            atm.envMinReach = 0.0           # [m]
+            atm.envMaxReach = 1000e3        # [m] cap model above 1000 km
+
+            # simSetPlanetEnvironment.exponentialAtmosphere(atm, "earth") # Will give the same response as scaleHeight = 7200
+            logging.debug("Exponential atmosphere model has been initialized")
+
         
         # If the simulation is configured to not use drag, return None
-        if not self.cfg.b_set.useExponentialDensityDrag:
+        else:
+            logging.debug("No atmosphere model has been initialized")
             return None
         
-        # Initialize ExponentialAtmosphere object
-        atm = exponentialAtmosphere.ExponentialAtmosphere()
-
-        # Atmosphere parameters
-        atm.ModelTag = "expAtm"
-        atm.planetRadius = 6378136.6            # [m] WGS-84 equatorial radius
-        atm.scaleHeight = 7200.0                 # [m] typical scale height
-        atm.baseDensity = 1.225                  # [kg/m^3] density at 0 m
-        atm.envMinReach = 0.0                    # [m]
-        atm.envMaxReach = 1000e3             # [m] cap model above 1000 km
+        # Add to task
         self.scSim.AddModelToTask(self.simTaskName, atm)
-
         return atm
     
 
     def conditional_drag_effector(self, 
                                   sat: Satellite,
                                   scObj: spacecraft.Spacecraft,
-                                  atm: Optional[exponentialAtmosphere.ExponentialAtmosphere]
+                                  atm: Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, msisAtmosphere.MsisAtmosphere]]
                                  ) -> spacecraft.Spacecraft:
         """
         if the simulation is configured to use exponential density drag, then define the drag effector,
@@ -411,12 +486,19 @@ class BasiliskSimulator:
           scObject with mounted atmospheric drag if  useExponentialDensityDrag == true
         :rtype: Spacecraft
         """
+
+        use_msis = self.cfg.b_set.useMsisDrag
+        use_exp = self.cfg.b_set.useExponentialDensityDrag
         
-        if (not self.cfg.b_set.useExponentialDensityDrag) or (atm is None):
+        if ((not use_msis) and (not use_exp)) or (atm is None):
+            print("no atmosphere model initialized")
             return scObj
         
-        if not (isinstance(atm, exponentialAtmosphere.ExponentialAtmosphere)):
-            raise TypeError("The atmosphere object 'atm' is not of type exponentialAtmosphere.ExponentialAtmosphere")
+        if use_msis and (not isinstance(atm, msisAtmosphere.MsisAtmosphere)):
+            raise TypeError("Basilisk is configured to use an MSIS atmosphere model, but atmosphere object 'atm' is not of type 'msisAtmosphere.MsisAtmosphere'")
+        
+        elif use_exp and (not isinstance(atm, exponentialAtmosphere.ExponentialAtmosphere)):
+            raise TypeError("Basilisk is configured to use an Exponential atmosphere model, but atmosphere object 'atm' is not of type 'exponentialAtmosphere.ExponentialAtmosphere'")
 
         # ---- Drag effector (exponential density + cannonball) ----
         # Register this spacecraft with the atmosphere model to get its own atm mesg
@@ -428,8 +510,9 @@ class BasiliskSimulator:
 
         # Set core parameters
         core = dragDynamicEffector.DragBaseData()
-        core.dragCoeff = getattr(sat, "C_D", 2.2)
-        core.projectedArea = getattr(sat, "A_D", 0.06)
+        core.dragCoeff = sat.C_D # getattr(sat, "C_D", 2.2)
+        core.projectedArea = sat.A_D # getattr(sat, "A_D", 0.06)
+        print(f"sat: {sat.name}, A_D: {sat.A_D}")
         drag.coreParams = core
 
         # Subscribe to density from this spacecraft's atmosphere message
@@ -530,8 +613,8 @@ class BasiliskSimulator:
         # Define srp
         srp = radiationPressure.RadiationPressure()
         srp.setUseCannonballModel()
-        srp.coefficientReflection = getattr(sat, "C_R", 1.21)
-        srp.area = getattr(sat, "A_srp", 0.06)  
+        srp.coefficientReflection = sat.C_R # getattr(sat, "C_R", 1.21)
+        srp.area = sat.A_srp # getattr(sat, "A_srp", 0.06)  
 
         # Subscribe to Sun ephemeris + this spacecraft’s eclipse factor
         srp.sunEphmInMsg.subscribeTo(sunMsg)
@@ -646,8 +729,9 @@ class BasiliskSimulator:
 
     @staticmethod
     def to_spice_utc(s: str) -> str:
-        # s like "02.04.2025 12:00:00" (DD.MM.YYYY HH:MM:SS) in local time (Europe/Oslo)?
+        # s like "02.04.2025 12:00:00" (DD.MM.YYYY HH:MM:SS) in local time (Europe/Oslo)
         dt_local = datetime.strptime(s, "%d.%m.%Y %H:%M:%S")
-        # If the string is *already* UTC, replace with timezone.utc directly.
+        # If the string is already UTC, replace with timezone.utc directly.
         dt_utc = dt_local.replace(tzinfo=timezone.utc)
+
         return dt_utc.strftime("%Y %b %d %H:%M:%S UTC")

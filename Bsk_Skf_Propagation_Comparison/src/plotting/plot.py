@@ -16,7 +16,7 @@ from plotting.DataProcessor_def import DataProcessor
 
 
 RTN_DOWNSAMP_FAC: int = 5
-PLT_SAVE_FOLDER_PATH = Path('output_data/sim_plt')
+PLT_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_plt')
 PLT_HEIGHT = 6.0
 PLT_WIDTH = 16.0
 
@@ -61,7 +61,7 @@ def plot(cfg: Config) -> None:
     # Plotting #
     ############
 
-    # plot_groundtrack_comparison_start_stop(cfg, skf_sim_data, bsk_sim_data, 160, 168)
+    # plot_groundtrack_comparison_start_stop(cfg, skf_sim_data, bsk_sim_data, 20, 24)
 
     # plot_groundtrack_comparison(cfg, skf_sim_data, bsk_sim_data)
 
@@ -168,15 +168,46 @@ def plot(cfg: Config) -> None:
     # base_label = "Skf: SGP4 (base)"
     # skf_base_data_timestamp = cfg.old_skf_data_timestamp
 
+
+    #######################################
+    # Exponential atmosphere model tuning #
+    #######################################
+    # Different scale heights
+    bsk_data_timestamps = [("20260128_201056", "Bsk: H0=7200, SH4, Drag"),
+                        #    ("20260128_202042", "Bsk: H0=14000, SH4, Drag"),
+                        #    ("20260128_202314", "Bsk: H0=15000, SH4, Drag"),
+                        #    ("20260128_202902", "Bsk: H0=15150, SH4, Drag"),
+                           ("20260128_203157", "Bsk: H0=15180, SH4, Drag"),
+                        #    ("20260128_202531", "Bsk: H0=15200, SH4, Drag"),
+                           ("20260128_201713", "Bsk: H0=15472.3, SH4, Drag"),
+                        #    ("20260128_212400", "Bsk: H0=15180.0, All"),
+                        #    ("20260202_132014", "Bsk: H0=15180, SH2, Drag"),
+                        #    ("20260203_145648", "Bsk: ExpAtm=Earth planet env, SH4, Drag"), # Give the same respone as 20260128_201056
+                        #    ("20260204_143518", "Bsk: MSIS atm, SH4, Drag"), # 1st implementation attempt
+                           ("20260204_185210", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.06m2"), # After adding global/persistent msis messages
+                        #    ("20260204_205523", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+                           ("20260204_210619", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.12m2"),
+                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+                           
+                           ]
+    base_label = "Skf: SGP4 (base)"
+    skf_base_data_timestamp = cfg.old_skf_data_timestamp
+
     
-    # plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_rel_vel_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_simulator_state_mag_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
+                                                     view_lon_min=-180,
+                                                     view_lon_max=180,
+                                                     view_lat_min=-90,
+                                                     view_lat_max=90)
     # plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # plot_rel_vel_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
 
 #################################
 # Plotting function definitions #
@@ -1406,7 +1437,7 @@ def plot_rel_pos_multi_sim_diff_no_radial(
     data_processor = DataProcessor()
 
     # --------- Load Skyfield baseline ---------
-    skf_stamp = f"{skf_base_data_timestamp}_bsk" # BE VEEEEEEERY CAREFUL TO CHECK THIS !!!!!
+    skf_stamp = f"{skf_base_data_timestamp}_skf" # BE VEEEEEEERY CAREFUL TO CHECK THIS !!!!!
     skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
     if len(skf_files) == 0:
         raise FileNotFoundError(f"No Skyfield datafiles found for timestamp '{skf_stamp}'")
@@ -2215,7 +2246,7 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     data_processor = DataProcessor()
 
     # --------- Load baseline ---------
-    skf_stamp = f"{skf_base_data_timestamp}_bsk"  # REMEMBER TO SELECT THE CORRECT STRING ENDING!!!!
+    skf_stamp = f"{skf_base_data_timestamp}_skf"  # REMEMBER TO SELECT THE CORRECT STRING ENDING!!!!
     skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
     if len(skf_files) == 0:
         raise FileNotFoundError(f"No baseline datafiles found for timestamp '{skf_stamp}'")
@@ -2475,8 +2506,8 @@ def plot_groundtrack_multi_sim_comparison_start_stop(
     skf_base_data_timestamp: str,
     bsk_data_entries: list[tuple[str, str]],
     base_label: str,
-    start_plot_time_hours: float = 160.0,
-    end_plot_time_hours=168.0,
+    start_plot_time_hours: float = 90.0,
+    end_plot_time_hours=96.0,
     view_lon_min: float = 3.0,
     view_lon_max: float = 33.0,
     view_lat_min: float = 56.0,

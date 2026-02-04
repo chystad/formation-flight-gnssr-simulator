@@ -1,6 +1,7 @@
 import yaml
 import logging
 import numpy as np
+from typing import Any
 from pathlib import Path
 from numpy.typing import NDArray
 from pathlib import Path
@@ -20,6 +21,7 @@ class BasiliskSettings:
     integrator: str
     sphericalHarmonicsDegree: int
     useSphericalHarmonics: bool
+    useMsisDrag: bool
     useExponentialDensityDrag: bool
     useSRP: bool
     useSun3rdBody: bool
@@ -52,12 +54,12 @@ class Config:
             save_plots (bool):              Save plots if true
             bypass_sim_to_plot (bool):      If true: Skip the simulation to plot old data
             data_timestamp_to_plot (str):   Timestamp str for the data to plot. Only plot this if 'bypass_sim_to_plot' == true
-            satellite_param_path (str):     Path to the .yaml file containing the physical satellite parameters
             leader_tle_series_path (str):   Path to the .txt file containing a series of TLEs from oldest to newest for the leader satellite
             inplane_separation_ang (float): The in-plane orbital separation angle in degrees
             num_satellites (int):           The total number of satellites included in the simulation (leader + #follower(s))
+            all_sat_params
             timestamp_str (str):            Used in the naming of data files. str holding the real-world simulation start time.
-          # satellites (list[Satellite]):   One Satellite instance for each satellite described in the default config.
+            satellites (list[Satellite]):   One Satellite instance for each satellite described in the default config.
             b_set (BasiliskSettings):       BasiliskSettings instance describing the Basilisk simulation settings
             s_set (SkyfieldSettings):       SkyfieldSettings instance describing the Skyfield simulation settings     
         =========================================================================================================
@@ -81,16 +83,17 @@ class Config:
         save_plots =                d_cfg['PLOTTING']['save_plots'] # bool
         bypass_sim_to_plot =        d_cfg['PLOTTING']['bypass_sim_to_plot'] # str
         data_timestamp_to_plot =    d_cfg['PLOTTING']['data_timestamp_to_plot'] # str
-        satellite_param_path =      d_cfg['SATELLITES']['satellite_param_path'] # str
         leader_tle_series_path =    d_cfg['SATELLITES']['leader_tle_series_path'] # str
         inplane_separation_ang =    d_cfg['SATELLITES']['inplane_separation_ang'] # float
         num_satellites =            d_cfg['SATELLITES']['num_satellites'] # int
+        all_sat_params =            d_cfg['SATELLITES']['SATELLITE_PARAMETERS'] # ??
 
         # Fetch from basilisk.yaml
         bsk_deltaT =                    b_cfg['BASILISK_SIMULATION']['deltaT']
         integrator =                    b_cfg['BASILISK_SIMULATION']['integrator']
         sphericalHarmonicsDegree =      b_cfg['BASILISK_SIMULATION']['sphericalHarmonicsDegree']
         useSphericalHarmonics =         b_cfg['BASILISK_SIMULATION']['useSphericalHarmonics']
+        useMsisDrag =                   b_cfg['BASILISK_SIMULATION']['useMsisDrag']
         useExponentialDensityDrag =     b_cfg['BASILISK_SIMULATION']['useExponentialDensityDrag']
         useSRP =                        b_cfg['BASILISK_SIMULATION']['useSRP']
         useSun3rdBody =                 b_cfg['BASILISK_SIMULATION']['useSun3rdBody']
@@ -102,7 +105,7 @@ class Config:
 
         # Create Satellite intstances
         satellites = self.generate_satellite_instances_from_config(
-            satellite_param_path, 
+            all_sat_params, 
             leader_tle_series_path, 
             inplane_separation_ang, 
             num_satellites
@@ -119,7 +122,6 @@ class Config:
         self.save_plots: bool = save_plots
         self.bypass_sim_to_plot: bool = bypass_sim_to_plot
         self.data_timestamp_to_plot: str = data_timestamp_to_plot
-        self.satellite_param_path: str = satellite_param_path
         self.leader_tle_series_path: str = leader_tle_series_path
         self.inplane_separation_ang: float = inplane_separation_ang
         self.num_satellites: int = num_satellites
@@ -132,6 +134,7 @@ class Config:
             integrator,
             sphericalHarmonicsDegree,
             useSphericalHarmonics,
+            useMsisDrag,
             useExponentialDensityDrag,
             useSRP,
             useSun3rdBody,
@@ -216,7 +219,7 @@ class Config:
 
 
     def generate_satellite_instances_from_config(self, 
-                                                 satellite_param_path: str,
+                                                 all_sat_params: Any,
                                                  leader_tle_series_path: str,
                                                  inplane_separation_ang: float,
                                                  num_satellites: int) -> list[Satellite]:
@@ -229,26 +232,19 @@ class Config:
             (list[Satellite]): A list of num_satellites Satellite instances
         """
 
-        # Read satellite parameters from shared_input_data
-        loaded_sat_param = self.read(satellite_param_path)  
-
-        # Create 'num_satellites' Satellite instances
-        all_sat_param = loaded_sat_param['SATELLITES']
-
         # Check if parameters have been defined for enough satellites
-        if len(all_sat_param) < num_satellites:
-            raise ValueError(f"There has only been defined parameters for ({len(all_sat_param)}) satellites, while default.yaml specifies ({num_satellites}) satellites total.")
+        if len(all_sat_params) < num_satellites:
+            raise ValueError(f"There has only been defined parameters for ({len(all_sat_params)}) satellites, while default.yaml specifies ({num_satellites}) satellites total.")
 
         leader_path = Path(leader_tle_series_path)
         sat_it: int = 0
         satellites: list[Satellite] = []
         tle_processor = TLE(
-            satellite_param_path,
             leader_tle_series_path,
             inplane_separation_ang,
             num_satellites
         )
-        for sat_role, sat_param in all_sat_param.items():
+        for sat_role, sat_param in all_sat_params.items():
             if isinstance(sat_role, str):
                 # Extract/Generate a satellite name
                 if sat_role == "leader":
