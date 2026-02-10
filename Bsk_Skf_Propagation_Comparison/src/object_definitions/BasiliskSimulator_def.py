@@ -1,13 +1,16 @@
 import os
 import logging
 import numpy as np
-from typing import Optional, Any, Union
+import matplotlib.pyplot as plt # Only for debug
+import matplotlib.colors as mcolors # only for debug
+from typing import Optional, Any, Union, cast
 from numpy.typing import NDArray
 from datetime import datetime, timezone
 
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
+from plotting.plot import PLT_WIDTH, PLT_HEIGHT
 
 from Basilisk import __path__
 # always import the Basilisk messaging support
@@ -134,6 +137,7 @@ class BasiliskSimulator:
         # Initialize empty containers for to-be-defined Spacecraft objects and its recorders
         self.scObjects: list[spacecraft.Spacecraft] = []
         self.scRecorders: list = [] # list of what?
+        self.atmRecorders: list = []
 
         # get satellites from config
         satellites = self.cfg.satellites
@@ -191,15 +195,19 @@ class BasiliskSimulator:
             # ---- Define and append scRecorders and scObjects ----
             # Create object state and force recorders
             scRec = scObj.scStateOutMsg.recorder(samplingTime)
+            assert atm is not None
+            atmLog = atm.envOutMsgs[0].recorder(samplingTime)
             # srpRec = self.make_srp_recorder(srp, samplingTime)  
 
             # Add recorder to the simulation process
             self.scSim.AddModelToTask(self.simTaskName, scRec)
+            self.scSim.AddModelToTask(self.simTaskName, atmLog)
             # self.scSim.AddModelToTask(self.simTaskName, srpRec)
                         
             # Append defined spacecraft object and scRec to scObjects and scRecorders, respectively
             self.scObjects.append(scObj)
             self.scRecorders.append(scRec)
+            self.atmRecorders.append(atmLog)
             # self.srpRecorders.append(srpRec)       
 
 
@@ -287,6 +295,22 @@ class BasiliskSimulator:
         # print("||Sun position|| @0 [m]   =", np.linalg.norm(sun_pos))
         # if moon_pos is not None: print("||Moon position|| @0 [m] =", np.linalg.norm(moon_pos))
         #############################################
+
+
+        ############## MSIS ATM DEBUG ##############  
+        all_atm_data = self.atmRecorders
+        sat_0_dens_data = all_atm_data[0].neutralDensity
+        print(type(sat_0_dens_data))
+        print(len(sat_0_dens_data))
+        print(np.size(sat_0_dens_data))
+
+
+        # self.DEBUG_plot_msis_atm_density()
+        self.DEBUG_plot_msis_atm_density_against_altitude()
+
+
+
+        ############################################
 
 
     def output_data(self) -> None:
@@ -652,6 +676,11 @@ class BasiliskSimulator:
         return scObj
 
 
+
+    def load_msis_parameters(self) -> None:
+        pass
+
+
     @staticmethod
     def spaced_satellites_on_same_orbital_plane(satellite_idx: int, 
                                                 separation_ang: float, 
@@ -671,16 +700,19 @@ class BasiliskSimulator:
         """
         # setup the orbit using classical orbit elements
         oe = orbitalMotion.ClassicElements()
+    
+
         rLEO = 7000. * 1000      # meters
         rGEO = 42000. * 1000     # meters
 
-        oe.a = rLEO
-        oe.e = 0.001
-        oe.i = 33.3 * macros.D2R
-        oe.Omega = 48.2 * macros.D2R
-        oe.omega = 347.8 * macros.D2R
-        oe.f = 85.3 * macros.D2R
-        oe.f = oe.f - satellite_idx * separation_ang
+        # Missing type stub causes static error -> Ignore
+        oe.a = rLEO                                     # type: ignore
+        oe.e = 0.001                                    # type: ignore
+        oe.i = 33.3 * macros.D2R                        # type: ignore
+        oe.Omega = 48.2 * macros.D2R                    # type: ignore
+        oe.omega = 347.8 * macros.D2R                   # type: ignore
+        oe.f = 85.3 * macros.D2R                        # type: ignore
+        oe.f = oe.f - satellite_idx * separation_ang    # type: ignore
 
         rN, vN = orbitalMotion.elem2rv(mu, oe)
 
@@ -735,3 +767,110 @@ class BasiliskSimulator:
         dt_utc = dt_local.replace(tzinfo=timezone.utc)
 
         return dt_utc.strftime("%Y %b %d %H:%M:%S UTC")
+    
+
+    def DEBUG_plot_msis_atm_density_against_altitude(self) -> None:
+        """
+        Print
+        """
+        
+        def _darker_color(color, factor=0.5):
+            """
+            Return a darker shade of the given color.
+            factor < 1 → darker, factor = 1 → same color
+            """
+            rgb = np.array(mcolors.to_rgb(color))
+            return tuple(factor * rgb)
+        
+        # Standard Matplotlib tab colors (max 4 satellites)
+        base_colors = [
+            "tab:blue",
+            "tab:orange",
+            "tab:green",
+            "tab:red",
+        ]
+
+        # Load state data for all spacecrafts
+        all_sc_data = self.scRecorders
+        n_sc_data_objects = len(all_sc_data)
+
+        # Load atmosphere data for all spacecrafts
+        all_atm_data = self.atmRecorders
+        n_atm_data_objects = len(all_atm_data)
+        
+        # Checks
+        if not n_sc_data_objects == n_atm_data_objects:
+            raise ValueError(f"Not the same number of spacecraft recorders ({n_sc_data_objects}) as atmosphere recorders ({n_atm_data_objects})")            
+
+        if (n_sc_data_objects == 0) or (n_atm_data_objects == 0):
+            raise ValueError(f"No Spacecraft state recorders or Atmosphere recorders have been initialized")
+        
+        if len(all_sc_data[0].r_BN_N) == 0:
+            raise ValueError(f"No satellite position data contained in the spacecraft recorders")
+
+        if len(all_atm_data[0].neutralDensity) == 0:
+            raise ValueError(f"No atmosphere density data contained in the atmosphere recorders")
+        
+        n_data_objects = n_sc_data_objects
+            
+        # Initialize twin-plot
+        fig, ax_alt = plt.subplots(figsize=(PLT_WIDTH, PLT_HEIGHT))
+        ax_den = ax_alt.twinx()
+
+        # Iterate through all satellites to plot
+        satellites = self.cfg.satellites
+        for i in range(n_data_objects):
+            # Temp: only plot atm density against altitude for the first satellite
+            # if i > 0:
+            #     break
+
+            # Set colors
+            alt_color = base_colors[i]
+            den_color = _darker_color(alt_color, 0.7)
+
+            # Get current spacecraft name
+            sat_name = satellites[i].name
+
+            # Get data for the current spacecraft
+            sc_data = all_sc_data[i].r_BN_N
+            t_sc = all_sc_data[i].times() * 1e-9 / 3600 # [h]
+            dens_data = all_atm_data[i].neutralDensity
+            t_atm = all_atm_data[i].times() * 1e-9 / 3600 # [h]
+
+            # Calculate altitude
+            earth_radius = 6378.1366    # [km] WGS-84 equatorial radius
+            sc_alt = np.linalg.norm(sc_data, axis=1)*1e-3 - earth_radius # [km]
+
+            # --- Altitude (left axis) ---
+            ax_alt.plot(
+                t_sc,
+                sc_alt,
+                color = alt_color,
+                label=f"Altitude {sat_name}"
+            )
+            
+            # --- Density (right axis) ---
+            ax_den.plot(
+                t_atm,
+                dens_data,
+                color = den_color,
+                label=f"Density {sat_name}"
+            )
+
+        # ax_den.set_yscale("log")
+
+        ax_alt.set_xlabel("Time [h]")
+        ax_alt.set_ylabel("Altitude [km]")
+        ax_den.set_ylabel("Density [kg/m³]")
+
+        # Legends in bottom corners
+        ax_alt.legend(loc="lower left")
+        ax_den.legend(loc="lower right")
+
+        ax_alt.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+
+    

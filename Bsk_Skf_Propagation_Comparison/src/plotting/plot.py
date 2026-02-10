@@ -34,8 +34,9 @@ def plot(cfg: Config) -> None:
         logging.debug("Config settings specify: show_plots == false and save_plots == false, which makes the plotting function obsolete. -> Exiting plot()...")
         return
 
+    # MOVED TO __init__()
     # Stop plots to clutter the terminal with debug info
-    quiet_plots()
+    # quiet_plots()
     
     ##################################
     # Fetch and Load simulation data #
@@ -2730,20 +2731,20 @@ def conditional_show_plot(cfg: Config) -> None:
     else:
         return
  
+# Moved to __init__()
+# def quiet_plots() -> None:
+#     # Only show warnings and errors globally
+#     logging.basicConfig(level=logging.WARNING)
 
-def quiet_plots() -> None:
-    # Only show warnings and errors globally
-    logging.basicConfig(level=logging.WARNING)
+#     # Matplotlib: silence backend + font-manager chatter
+#     mpl.set_loglevel("warning")
+#     logging.getLogger("matplotlib").setLevel(logging.WARNING)
+#     logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
-    # Matplotlib: silence backend + font-manager chatter
-    mpl.set_loglevel("warning")
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
-
-    # Pillow (PIL): silence PNG chunk debug like "STREAM b'IHDR'"
-    #PngImagePlugin.debug = False
-    logging.getLogger("PIL").setLevel(logging.WARNING)
-    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+#     # Pillow (PIL): silence PNG chunk debug like "STREAM b'IHDR'"
+#     #PngImagePlugin.debug = False
+#     logging.getLogger("PIL").setLevel(logging.WARNING)
+#     logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 
 
 def get_simulation_time(cfg: Config) -> tuple[datetime, int, int]:

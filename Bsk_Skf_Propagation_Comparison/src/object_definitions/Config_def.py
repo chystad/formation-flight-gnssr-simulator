@@ -86,7 +86,7 @@ class Config:
         leader_tle_series_path =    d_cfg['SATELLITES']['leader_tle_series_path'] # str
         inplane_separation_ang =    d_cfg['SATELLITES']['inplane_separation_ang'] # float
         num_satellites =            d_cfg['SATELLITES']['num_satellites'] # int
-        all_sat_params =            d_cfg['SATELLITES']['SATELLITE_PARAMETERS'] # ??
+        all_sat_params =            d_cfg['SATELLITES']['SATELLITE_PARAMETERS'] # dict[str, dict[str, float]]
 
         # Fetch from basilisk.yaml
         bsk_deltaT =                    b_cfg['BASILISK_SIMULATION']['deltaT']
@@ -219,7 +219,7 @@ class Config:
 
 
     def generate_satellite_instances_from_config(self, 
-                                                 all_sat_params: Any,
+                                                 all_sat_params: dict[str, dict[str, float]],
                                                  leader_tle_series_path: str,
                                                  inplane_separation_ang: float,
                                                  num_satellites: int) -> list[Satellite]:
