@@ -22,12 +22,7 @@ from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion,
 
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Bsk_Skf_Propagation_Comparison/output_data/_VizFiles/bsk_sim.bin"
 GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
-
-"""
-=========================================================================================================
-TODO docstring
-=========================================================================================================
-"""
+EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
 
 class BasiliskSimulator:
     """
@@ -43,6 +38,8 @@ class BasiliskSimulator:
         sunRec          Sun state recorder
         msisSwMsgList   
         msisSwMsgDict   Dictionary containing the MSIS atmosphere model
+        spiceTime       (str)
+        epochMsg        (messaging.EpochMsg)
     =========================================================================================================
     """
     def __init__(self, cfg: Config) -> None:
@@ -61,6 +58,10 @@ class BasiliskSimulator:
         ###################################
         # Configure simulation parameters #
         ###################################
+
+        # Set Simulation time
+        self.spiceTime = self.to_spice_utc(self.cfg.startTime)   # Only used to set up SPICE interface
+        self.epochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime)   # Used for time-dependent models (MSIS)
 
         # Set fixed simulation integration time step
         simulationTimeStep = macros.sec2nano(b_set.deltaT)
@@ -158,7 +159,7 @@ class BasiliskSimulator:
             if b_set.override_skf_initial_state:
                 # Get initial conditions corresponding to satellites separated by an arbitrary angle 
                 # in the same orbital plane
-                separationAng = 20.0 * macros.D2R
+                separationAng = self.cfg.inplane_separation_ang * macros.D2R
                 rN, vN = self.spaced_satellites_on_same_orbital_plane(i, separationAng, gravFactory.gravBodies["earth"].mu)
 
                 # Edit and uncomment this function to use user-defined initial states:
@@ -373,20 +374,19 @@ class BasiliskSimulator:
         # Initialize SPICE publisher to get accurate positions of the planets defined within gravFactory. 
         spicePath = os.path.join(__path__[0], "supportData", "EphemerisData") + os.sep
         spiceKernels = ["de430.bsp", "naif0012.tls", "de-403-masses.tpc", "pck00010.tpc"]
-        spiceTime = self.to_spice_utc(self.cfg.startTime)
         
         # Will always create SPICE objects "earth" and "sun". "moon" is created if useMoon3rdBody == True
         spiceObj = gravFactory.createSpiceInterface(
             path=spicePath,
-            time=spiceTime,
+            time=self.spiceTime,
             spiceKernelFileNames=spiceKernels,
-            epochInMsg=False
+            epochInMsg=True
         )
         spiceObj.zeroBase = "earth"
+        spiceObj.epochInMsg.subscribeTo(self.epochMsg)
         
         # Schedule object to simualtion process
         self.scSim.AddModelToTask(self.simTaskName, spiceObj)
-
 
         return gravFactory, spiceObj
 
@@ -455,6 +455,9 @@ class BasiliskSimulator:
             # Keep a reference message so it doesn't get CE'ed
             self.msisSwMsgDict = sw_msg
             self.msisSwMsgList = swMsgList
+            
+            # Subscribe to epoch message
+            atm.epochInMsg.subscribeTo(self.epochMsg)
 
             logging.debug("MSIS atmosphere model has been initialized")
 
@@ -466,7 +469,7 @@ class BasiliskSimulator:
             atm.ModelTag = "expAtm"
 
             # Exponential atmosphere parameters
-            atm.planetRadius = 6378136.6    # [m] WGS-84 equatorial radius
+            atm.planetRadius = EARTH_RADIUS
             atm.scaleHeight = 15180.0       # [m] typical scale height (7200 before tuning)
             atm.baseDensity = 1.225         # [kg/m^3] density at 0 m
             atm.envMinReach = 0.0           # [m]
@@ -838,8 +841,7 @@ class BasiliskSimulator:
             t_atm = all_atm_data[i].times() * 1e-9 / 3600 # [h]
 
             # Calculate altitude
-            earth_radius = 6378.1366    # [km] WGS-84 equatorial radius
-            sc_alt = np.linalg.norm(sc_data, axis=1)*1e-3 - earth_radius # [km]
+            sc_alt = (np.linalg.norm(sc_data, axis=1) - EARTH_RADIUS)*1e-3 # [km]
 
             # --- Altitude (left axis) ---
             ax_alt.plot(
