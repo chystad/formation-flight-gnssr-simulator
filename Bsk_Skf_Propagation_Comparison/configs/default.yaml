@@ -1,9 +1,9 @@
 # Global simulation configuration settings
 SIMULATION:
-  startTime: "01.01.2026 04:45:41" # UTC time. TODO: Remove, and implement automatic detection of start time based on first TLE Epoch
-  simulationDuration: 175 # hours TODO: Add functionality that raises a warning if the duration is far beyond the last TLE's epoch
-  use_old_skf_data: false # Skip Skyfield simulation (used when you want to use the same SGP4 baseline to compare against multiple Basilisk runs)
-  old_skf_data_timestamp: "20260128_201056" # Timestamp WITHOUT "_skf" at the end
+  startTime: "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
+  simulationDuration: 48 # hours TODO: Add functionality that raises a warning if the duration is far beyond the last TLE's epoch
+  use_old_skf_data: true # Skip Skyfield simulation (used when you want to use the same SGP4 baseline to compare against multiple Basilisk runs)
+  old_skf_data_timestamp: "20260216_135845" # Timestamp WITHOUT "_skf" at the end
 
 # Plotting options
 PLOTTING:
@@ -17,7 +17,7 @@ PLOTTING:
 SATELLITES:
   leader_tle_series_path: shared_input_data/tle_files/HYPSO-1_tle_series.txt
   inplane_separation_ang: 10 # [deg]
-  num_satellites: 1
+  num_satellites: 2
 
   SATELLITE_PARAMETERS: # NOTE: Satellite names must be 'leader', followed by 'follower-1', 'follower-2', etc.
     leader:

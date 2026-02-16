@@ -3,43 +3,340 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt # Only for debug
 import matplotlib.colors as mcolors # only for debug
-from typing import Optional, Any, Union, cast
+from typing import Optional, Any, Union, Dict
 from numpy.typing import NDArray
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
+from dataclasses import dataclass
+from dataclasses_json import dataclass_json
+
+from Basilisk import __path__
+from Basilisk.architecture import messaging, sysModel
+from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
+                                exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, svIntegrators)
+from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion,
+                                simIncludeGravBody, unitTestSupport, vizSupport)
 
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
 from plotting.plot import PLT_WIDTH, PLT_HEIGHT
 
-from Basilisk import __path__
-# always import the Basilisk messaging support
-from Basilisk.architecture import messaging
-from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
-                                exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, svIntegrators)
-from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion,
-                                simIncludeGravBody, unitTestSupport, vizSupport)
 
+EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Bsk_Skf_Propagation_Comparison/output_data/_VizFiles/bsk_sim.bin"
 GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
-EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
+SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
+MSIS_SW_KEYS: list[str] = [
+    "ap_24_0",      # 24 hour ap avg. ending now
+    "ap_3_0",       # 3 hour ap avg. ending now
+    "ap_3_-3",      # 3 hour ap avg. ended 3 hours ago
+    "ap_3_-6",      # 3 hour ap avg. ended 6 hours ago
+    "ap_3_-9",      # etc.
+    "ap_3_-12",
+    "ap_3_-15",
+    "ap_3_-18",
+    "ap_3_-21",
+    "ap_3_-24",
+    "ap_3_-27",
+    "ap_3_-30",
+    "ap_3_-33",
+    "ap_3_-36",
+    "ap_3_-39",
+    "ap_3_-42",
+    "ap_3_-45",
+    "ap_3_-48",
+    "ap_3_-51",
+    "ap_3_-54",
+    "ap_3_-57",
+    "f107_1944_0",   # 81-day avg of f107adj
+    "f107_24_-24",   # previous day's f107adj
+]
+
+
+@dataclass_json
+@dataclass
+class SpaceWeatherDay:
+    """One UTC day of space-weather data from Kp_ap_Ap_SN_F107_since_2010.txt."""
+    ap: list[int]        # 8x 3-hour ap values: [00-03, 03-06, ..., 21-24]
+    Ap: int              # daily Ap
+    f107obs: float       # adjusted F10.7
+    f107adj: float       # observed F10.7
+
+
+class MsisInputUpdater(sysModel.SysModel):
+    """
+    =========================================================================================================
+    ATTRIBUTES:
+        spaceWeatherData    (Dict[date, SpaceWeatherDay]) Contains space weather parameters 
+                                from date(cfg.startTime-81days) to date(cfg.startTime + simulationDuration hours)
+        _simStartDt         (datetime) Simulation start time helper
+        _simEndDt           (datetime) Simulation end time helper
+    =========================================================================================================
+    """
+    def __init__(self, cfg: Config, sw_writers: list[messaging.SwDataMsg]):
+        super().__init__()
+
+        # Configure update of MSIS input parameters every XXX hours
+        updateIntervalHour = 3
+        self.updateIntervalNanos = macros.hour2nano(updateIntervalHour)
+        self.nextUpdateNanos = 0 
+
+        # Set simulation start and end datetime objects, and load space weather data 
+        self._simStartDt = datetime.strptime(cfg.startTime, "%d.%m.%Y %H:%M:%S").replace(tzinfo=timezone.utc)
+        self._simEndDt = self._simStartDt + timedelta(hours=float(cfg.simulationDuration))
+        self.sw_writers = sw_writers
+        self.spaceWeatherData = self._load_space_weather_data()
+
+
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        
+        # When it is time to update MSIS input parameters
+        # If sim jumps over multiple 3 hour bins, catch up (while)
+        while CurrentSimNanos >= self.nextUpdateNanos:
+
+            # Get the MSIS inputs for the current 3 hour bin
+            msisInputDict = self._get_msis_inputs(CurrentSimNanos)
+
+            # Apply updated MSIS inputs
+            self._apply_msis_inputs(msisInputDict)
+
+            # Calculate when the next MSIS input update should be in nanos
+            self.nextUpdateNanos += self.updateIntervalNanos
+        
+
+    def _load_space_weather_data(self) -> Dict[date, SpaceWeatherDay]:
+        """
+        Parse space weather data from SPACE_WEATHER_DATA_FILE_PATH once and store a local database 
+        for fast queries during runtime. The method will load data in range:
+            from date(cfg.startTime - 81days) to date(cfg.startTime + simulationDuration hours)
+        And will raise an error if the data file does not exist OR if the data does not cover the desired range
+
+        Uses:
+            self.cfg.startTime: "dd.mm.yyyy hh:mm:ss" (UTC)
+            self.cfg.simulationDuration: hours (float/int)
+
+        Creates:
+            self.spaceWeatherData: Dict[date, SpaceWeatherDay]
+        """
+        # Parse sim time window
+        start_dt = self._simStartDt
+        end_dt = self._simEndDt
+
+        # Need history for F10.7A (81-day average). Load with margin.
+        load_start = start_dt.date() - timedelta(days=81) - timedelta(days=1)# -1 day buffer for edge cases
+        load_end = end_dt.date() + timedelta(days=1)  # +1 day buffer for edge cases
+
+        # Define path to space weather data file and ensure its existance
+        sw_path = SPACE_WEATHER_DATA_FILE_PATH
+
+        if not os.path.isfile(sw_path):
+            raise FileNotFoundError(
+                f"Space weather file not found at '{sw_path}'."
+            )
+
+        # Parse file
+        data: Dict[date, SpaceWeatherDay] = {}
+
+        with open(sw_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+
+                parts = s.split()
+                # Expecting part indices to correspond to the following fields:
+                #   0 y,1 m,2 d, 3 days,4 days_m,5 BSR,6 dB,
+                #   7..14 Kp1..Kp8,
+                #   15..22 ap1..ap8,
+                #   23 Ap, 24 SN, 25 f107obs, 26 f107adj, 27 D
+                if len(parts) < 28:
+                    continue  # defensively skip malformed lines
+
+                y = int(parts[0]); m = int(parts[1]); d = int(parts[2])
+                day_key = date(y, m, d)
+
+                # Filter to the required window only (saves memory and speeds up lookup)
+                if day_key < load_start or day_key > load_end:
+                    continue
+
+                ap_bins = [int(x) for x in parts[15:23]]
+                Ap = int(parts[23])
+                f107obs = float(parts[25])
+                f107adj = float(parts[26])
+
+                day_data = SpaceWeatherDay(
+                    ap_bins,
+                    Ap,
+                    f107obs,
+                    f107adj
+                )
+                data[day_key] = day_data
+
+        if not data:
+            raise ValueError(
+                f"No space weather data loaded from {sw_path} within {load_start}..{load_end}."
+            )
+        
+        # Ensure the exact requested coverage has been loaded.
+        required_days = (load_end - load_start).days + 1
+        missing = [
+            load_start + timedelta(days=i)
+            for i in range(required_days)
+            if (load_start + timedelta(days=i)) not in data
+        ]
+        if missing:
+            raise ValueError(
+                "Space weather file does not cover the full required date range. "
+                f"Missing {len(missing)} day(s); first missing: {missing[0]}, last missing: {missing[-1]}."
+            )
+
+        logging.debug(f"Space weather parameters has been parsed and loaded in range {load_start}..{load_end}")
+        return data
+    
+
+    def _get_msis_inputs(self, sim_time_ns: int) -> Dict[str, float]:
+        """
+        Compute the 23 MSIS space-weather inputs for the *current* 3-hour UTC bin.
+
+        Args:
+            sim_time_ns (int): Basilisk-style simulation time in nanoseconds since simulation start epoch.
+
+        Returns:
+            Dict[str, float] keyed by MSIS_SW_KEYS (23 entries).
+        """
+        if not hasattr(self, "spaceWeatherData"):
+            raise RuntimeError("spaceWeatherData not loaded. Call load_space_weather_data() first.")
+
+        # Convert sim time -> UTC datetime (Basilisk time is typically ns)
+        now_dt = self._simStartDt + timedelta(seconds=float(sim_time_ns) * macros.NANO2SEC)
+
+        def ap_at(dt_utc: datetime) -> int:
+            """Return ap for the 3-hour bin containing dt_utc."""
+            day = dt_utc.date()
+            rec = self.spaceWeatherData.get(day)
+            if rec is None:
+                raise ValueError(f"No space weather data for date {day}. Loaded range {min(self.spaceWeatherData.keys())}..{max((self.spaceWeatherData.keys()))}.")
+            bin_idx = int(dt_utc.hour // 3)  # 0..7
+            return int(rec.ap[bin_idx])
+
+        # ap history at 3-hour resolution:
+        # ap_3_0 is current bin; ap_3_-3 is previous bin; ... ap_3_-57 is 19 bins back.
+        ap_hist: list[int] = []
+        for k in range(0, 20):  # 0..19 => 20 bins => 0, -3, -6, ..., -57 hours
+            ap_hist.append(ap_at(now_dt - timedelta(hours=3 * k)))
+
+        # ap_24_0: average of the last 8 bins (24 hours) including current bin
+        ap_24_0 = float(sum(ap_hist[0:8])) / 8.0
+
+        # f107_24_-24: previous day's adjusted F10.7
+        prev_day = now_dt.date() - timedelta(days=1)
+        prev_rec = self.spaceWeatherData.get(prev_day)
+        if prev_rec is None:
+            raise ValueError(f"No space weather data for previous day {prev_day} needed for f107_24_-24.")
+        f107_24_m24 = float(prev_rec.f107adj)
+
+        # f107_1944_0: last 81 day average adjusted f107
+        d0 = now_dt.date()
+        window_days = [d0 - timedelta(days=i) for i in range(0, 81)]
+        f107_window = [float(self.spaceWeatherData[d].f107adj) for d in window_days]
+        f107_81avg = float(sum(f107_window)) / float(len(f107_window))
+
+        # Build output in a stable, explicit way (so ordering never depends on dict insertion)
+        out: Dict[str, float] = {}
+        out["ap_24_0"] = ap_24_0
+        out["ap_3_0"] = float(ap_hist[0])
+        out["ap_3_-3"] = float(ap_hist[1])
+        out["ap_3_-6"] = float(ap_hist[2])
+        out["ap_3_-9"] = float(ap_hist[3])
+        out["ap_3_-12"] = float(ap_hist[4])
+        out["ap_3_-15"] = float(ap_hist[5])
+        out["ap_3_-18"] = float(ap_hist[6])
+        out["ap_3_-21"] = float(ap_hist[7])
+        out["ap_3_-24"] = float(ap_hist[8])
+        out["ap_3_-27"] = float(ap_hist[9])
+        out["ap_3_-30"] = float(ap_hist[10])
+        out["ap_3_-33"] = float(ap_hist[11])
+        out["ap_3_-36"] = float(ap_hist[12])
+        out["ap_3_-39"] = float(ap_hist[13])
+        out["ap_3_-42"] = float(ap_hist[14])
+        out["ap_3_-45"] = float(ap_hist[15])
+        out["ap_3_-48"] = float(ap_hist[16])
+        out["ap_3_-51"] = float(ap_hist[17])
+        out["ap_3_-54"] = float(ap_hist[18])
+        out["ap_3_-57"] = float(ap_hist[19])
+        out["f107_1944_0"] = f107_81avg
+        out["f107_24_-24"] = f107_24_m24
+
+        # Optional sanity check: ensure we return exactly the expected keyset
+        if set(out.keys()) != set(MSIS_SW_KEYS):
+            missing = [k for k in MSIS_SW_KEYS if k not in out]
+            extra = [k for k in out.keys() if k not in MSIS_SW_KEYS]
+            raise RuntimeError(f"MSIS inputs key mismatch. Missing={missing}, Extra={extra}")
+
+        ########### DEBUG ###########
+        # print(f"""[MsisInputUpdater] All MSIS inputs at offset: {float(sim_time_ns) * macros.NANO2HOUR}, date: ({now_dt})
+        #            ap_24_0     = {out["ap_24_0"]},      (old: {self.sw_writers[0].read().dataValue})
+        #            ap_3_0      = {out["ap_3_0"]},       (old: {self.sw_writers[1].read().dataValue})
+        #            ap_3_-3     = {out["ap_3_-3"]},      (old: {self.sw_writers[2].read().dataValue})
+        #            ap_3_-6     = {out["ap_3_-6"]},      (old: {self.sw_writers[3].read().dataValue})
+        #            ap_3_-9     = {out["ap_3_-9"]},      (old: {self.sw_writers[4].read().dataValue})
+        #            ap_3_-12    = {out["ap_3_-12"]},     (old: {self.sw_writers[5].read().dataValue})
+        #            ap_3_-15    = {out["ap_3_-15"]},     (old: {self.sw_writers[6].read().dataValue})
+        #            ap_3_-18    = {out["ap_3_-18"]}
+        #            ap_3_-21    = {out["ap_3_-21"]}
+        #            ap_3_-24    = {out["ap_3_-24"]}
+        #            ap_3_-27    = {out["ap_3_-27"]}
+        #            ap_3_-30    = {out["ap_3_-30"]}
+        #            ap_3_-33    = {out["ap_3_-33"]}
+        #            ap_3_-36    = {out["ap_3_-36"]}
+        #            ap_3_-39    = {out["ap_3_-39"]}
+        #            ap_3_-42    = {out["ap_3_-42"]}
+        #            ap_3_-45    = {out["ap_3_-45"]}
+        #            ap_3_-48    = {out["ap_3_-48"]}
+        #            ap_3_-51    = {out["ap_3_-51"]}
+        #            ap_3_-54    = {out["ap_3_-54"]}
+        #            ap_3_-57    = {out["ap_3_-57"]}
+        #            f107_1944_0 = {out["f107_1944_0"]}
+        #            f107_24_-24 = {out["f107_24_-24"]}""")
+        return out
+    
+
+    def _apply_msis_inputs(self, msis_inputs: Dict[str, float]) -> None:
+        """
+        Publish updated MSIS inputs to the 23 SwData messages in the correct order
+
+        Args:
+            msis_inputs (Dict[str, float]): Updated MSIS model inputs for the current 3 hour bin
+
+        Returns:
+            None
+        """
+        for i, key in enumerate(MSIS_SW_KEYS):
+            payload = messaging.SwDataMsgPayload(dataValue=float(msis_inputs[key]))
+            self.sw_writers[i].write(payload)
+
 
 class BasiliskSimulator:
     """
     =========================================================================================================
     ATTRIBUTES:
-        cfg             Config instance
-        integrators     
-        simTaskName     Simulation task name (str)
-        scSim           Simulation module container
-        scObjects       List containing all simulation objects (satellites)
-        scRecorders   List containing all simulation recorders (one for each scObject)
-        sim_data        Object containing the simulaton output data (Optional[SimData])
-        sunRec          Sun state recorder
-        msisSwMsgList   
-        msisSwMsgDict   Dictionary containing the MSIS atmosphere model
-        spiceTime       (str)
-        epochMsg        (messaging.EpochMsg)
+        cfg                 (Config) Global config instance 
+        integrators         (list[svIntegrators.Any]) List containing the numerical integrator used
+                                to propagate each spacecraft's states 
+        simTaskName         (str) Simulation task name 
+        scSim               (SimBaseClass) Simulation module container
+        dynProcess          (ProcessBaseClass) Simulation process 
+        scObjects           (list[Spacecraft]) List containing all simulation objects
+        scRecorders         (list[]) List containing all simulation recorders (one for each scObject)
+        msisInputUpdater    (MsisInputUpdater(SysModel)) Separate task for updating 
+                                MSIS input parameters during simulation execution
+        spiceTime           (str) Time string used to initialize the SpiceInterface
+        epochMsg            (messaging.EpochMsg) Centralized epoch message used by all models
+        spaceWeatherData    (Dict[date, SpaceWeatherDay]) Contains space weather parameters 
+                                from date(cfg.startTime-81days) to date(cfg.startTime + simulationDuration hours)
+        sim_data            (Optional[SimData]) Object containing the simulaton output data 
+        _simStartDt         (datetime) Simulation start time helper
+        _simEndDt           (datetime) Simulation end time helper
     =========================================================================================================
     """
     def __init__(self, cfg: Config) -> None:
@@ -54,14 +351,17 @@ class BasiliskSimulator:
         b_set = cfg.b_set  # basilisk config
         
 
-
         ###################################
         # Configure simulation parameters #
         ###################################
 
         # Set Simulation time
-        self.spiceTime = self.to_spice_utc(self.cfg.startTime)   # Only used to set up SPICE interface
-        self.epochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime)   # Used for time-dependent models (MSIS)
+        self.spiceTime = self.to_spice_utc(self.cfg.startTime)   # Only used to initialize SPICE interface
+        self.epochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime)   # Used for time-dependent models (SPICE interface (eclipse model by extension), MSIS)
+        
+        # Helper simulation time datetime objects used by other methods
+        self._simStartDt = datetime.strptime(self.cfg.startTime, "%d.%m.%Y %H:%M:%S").replace(tzinfo=timezone.utc)
+        self._simEndDt = self._simStartDt + timedelta(hours=float(self.cfg.simulationDuration))
 
         # Set fixed simulation integration time step
         simulationTimeStep = macros.sec2nano(b_set.deltaT)
@@ -79,9 +379,9 @@ class BasiliskSimulator:
         # Initialize integrator list to prevent it being CE'ed
         self.integrators = []
 
-        # Initialize MSIS atmosphere message list and dictionary to prevent it being CE'ed
-        self.msisSwMsgList = []
-        self.msisSwMsgDict = {}
+        # Create a stable list of publishers (writers) in the exact MSIS order
+        self.msisSwWriters: list[messaging.SwDataMsg] = []
+        self.msisSwMsgs: list[messaging.SwDataMsg] = []  # optional: store the published m
 
         # path to basilisk. Used to fetch predesigned models
         bskPath = __path__[0]
@@ -105,11 +405,11 @@ class BasiliskSimulator:
         # Configure the use of simulation progress bar
         self.scSim.SetProgressBar(True)
 
-        # Create the simulation process
-        dynProcess = self.scSim.CreateNewProcess(simProcessName)
+        # Create the simulation process. Will contain all scheduled tasks
+        self.dynProcess = self.scSim.CreateNewProcess(simProcessName)
 
-        # create the dynamics task and specify the integration update time
-        dynProcess.addTask(self.scSim.CreateNewTask(self.simTaskName, simulationTimeStep))
+        # create the simulation task with a simulation time step, and give it 0 priority (will be executed last)
+        self.dynProcess.addTask(self.scSim.CreateNewTask(self.simTaskName, simulationTimeStep), 0)
         
 
         ######################################################################
@@ -197,7 +497,7 @@ class BasiliskSimulator:
             # Create object state and force recorders
             scRec = scObj.scStateOutMsg.recorder(samplingTime)
             assert atm is not None
-            atmLog = atm.envOutMsgs[0].recorder(samplingTime)
+            atmLog = atm.envOutMsgs[i].recorder(samplingTime)
             # srpRec = self.make_srp_recorder(srp, samplingTime)  
 
             # Add recorder to the simulation process
@@ -299,18 +599,14 @@ class BasiliskSimulator:
 
 
         ############## MSIS ATM DEBUG ##############  
-        all_atm_data = self.atmRecorders
-        sat_0_dens_data = all_atm_data[0].neutralDensity
-        print(type(sat_0_dens_data))
-        print(len(sat_0_dens_data))
-        print(np.size(sat_0_dens_data))
-
+        # all_atm_data = self.atmRecorders
+        # sat_0_dens_data = all_atm_data[0].neutralDensity
+        # print(type(sat_0_dens_data))
+        # print(len(sat_0_dens_data))
+        # print(np.size(sat_0_dens_data))
 
         # self.DEBUG_plot_msis_atm_density()
         self.DEBUG_plot_msis_atm_density_against_altitude()
-
-
-
         ############################################
 
 
@@ -411,16 +707,9 @@ class BasiliskSimulator:
             # Initialize MsisAtmosphere instance
             atm = msisAtmosphere.MsisAtmosphere()
             atm.ModelTag = "msisAtm"
-            
-            # Manually extracted data for sim time = 01.01.2026 01:00:00
-            # ap1: 00:00–03:00
-            # ap2: 03:00–06:00
-            # ap3: 06:00–09:00
-            # ap4: 09:00–12:00
-            # ap5: 12:00–15:00
-            # ap6: 15:00–18:00
-            # ap7: 18:00–21:00
-            # ap8: 21:00–24:00
+
+            # Default MSIS model inputs.
+            # (Only actually valid for 01.01.2026, [00:00:00 - 03:00:00])
             sw_msg = {
                 "ap_24_0": 7,   # avg of [ap1(01.01.2026),  ap2(31.12.2025)] (last 8 3-hour segments, including current 3-hour window)
                 "ap_3_0": 7,    # ap1(01.01.2026)
@@ -446,18 +735,27 @@ class BasiliskSimulator:
                 "f107_1944_0": 150, # f107adj avg of last 81 days [f107adj(01.01.2026),  f107adj(13.10.2025)] (value guessed here)
                 "f107_24_-24": 164.8 # f107adj(31.12.2025) day avg for the previous day 
             } 
-            swMsgList = []
-            for c, val in enumerate(sw_msg.values()):
-                swMsgData = messaging.SwDataMsgPayload(dataValue=val)
-                swMsgList.append(messaging.SwDataMsg().write(swMsgData))
-                atm.swDataInMsgs[c].subscribeTo(swMsgList[-1])
 
-            # Keep a reference message so it doesn't get CE'ed
-            self.msisSwMsgDict = sw_msg
-            self.msisSwMsgList = swMsgList
-            
+            for i, key in enumerate(MSIS_SW_KEYS):
+                writer = messaging.SwDataMsg()
+                self.msisSwWriters.append(writer)
+
+                # initial payload
+                swMsgData = messaging.SwDataMsgPayload(dataValue=float(sw_msg[key]))
+                msg_handle = writer.write(swMsgData)
+                self.msisSwMsgs.append(msg_handle)
+
+                # connect MSIS input i to this publisher
+                atm.swDataInMsgs[i].subscribeTo(msg_handle)
+
             # Subscribe to epoch message
             atm.epochInMsg.subscribeTo(self.epochMsg)
+
+            # Schedule a new task in the simulation process to update MSIS model inputs at a slow frequency during simulation execution
+            updaterTimeStep = macros.min2nano(30)
+            self.dynProcess.addTask(self.scSim.CreateNewTask("msisInputUpdater", updaterTimeStep), 10) # High exec priority
+            self.msisInputUpdater = MsisInputUpdater(self.cfg, self.msisSwWriters)
+            self.scSim.AddModelToTask("msisInputUpdater", self.msisInputUpdater)
 
             logging.debug("MSIS atmosphere model has been initialized")
 
@@ -518,7 +816,7 @@ class BasiliskSimulator:
         use_exp = self.cfg.b_set.useExponentialDensityDrag
         
         if ((not use_msis) and (not use_exp)) or (atm is None):
-            print("no atmosphere model initialized")
+            logging.debug("no atmosphere model initialized")
             return scObj
         
         if use_msis and (not isinstance(atm, msisAtmosphere.MsisAtmosphere)):
@@ -539,7 +837,6 @@ class BasiliskSimulator:
         core = dragDynamicEffector.DragBaseData()
         core.dragCoeff = sat.C_D # getattr(sat, "C_D", 2.2)
         core.projectedArea = sat.A_D # getattr(sat, "A_D", 0.06)
-        print(f"sat: {sat.name}, A_D: {sat.A_D}")
         drag.coreParams = core
 
         # Subscribe to density from this spacecraft's atmosphere message
@@ -602,7 +899,6 @@ class BasiliskSimulator:
         # self.scSim.AddModelToTask(self.simTaskName, self.earthRec)
         # if self.moonRec is not None: self.scSim.AddModelToTask(self.simTaskName, self.moonRec)
         #################################################
-
 
         return sunMsg, eclipseObj
     
@@ -679,11 +975,6 @@ class BasiliskSimulator:
         return scObj
 
 
-
-    def load_msis_parameters(self) -> None:
-        pass
-
-
     @staticmethod
     def spaced_satellites_on_same_orbital_plane(satellite_idx: int, 
                                                 separation_ang: float, 
@@ -725,7 +1016,7 @@ class BasiliskSimulator:
     @staticmethod
     def custom_initial_states(satellite_idx: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """
-        Edit this function to manually output the initial states for the satellites
+        Edit the parameters in this method to manually output the initial states for each satellite
         
         Args:
             satellite_num (int): The satellite index in cfg.satellites
@@ -873,6 +1164,3 @@ class BasiliskSimulator:
 
         plt.tight_layout()
         plt.show()
-
-
-    
