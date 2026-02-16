@@ -152,7 +152,7 @@ class Config:
             self.save_combined_config(config_file_path, d_cfg)
         
         else:
-            logging.debug(f"Bypassing simulation to plot data with the timestamp: {data_timestamp_to_plot}")
+            logging.debug(f"[CFG] Bypassing simulation to plot data with the timestamp: {data_timestamp_to_plot}")
 
             # Check if there are any datafiles with the timestamp 'data_timestamp_to_plot'
             # Collect all matching .h5 files and return their names as strings
@@ -215,7 +215,7 @@ class Config:
         with open(out_path, "w") as f_out:
             f_out.write(combined_text)
 
-        logging.info(f"Combined config written to: {out_path}")
+        logging.info(f"[CFG] Combined config written to: {out_path}")
 
 
     def generate_satellite_instances_from_config(self, 
@@ -270,7 +270,7 @@ class Config:
                 init_vel = None  # This field will be populated by data from skyfield later
             )
 
-            logging.debug(f"Appending {sat_name} to 'satellites'")
+            logging.debug(f"[CFG] Appending {sat_name} to 'satellites'")
             satellites.append(satellite)
 
             # Check exit condition

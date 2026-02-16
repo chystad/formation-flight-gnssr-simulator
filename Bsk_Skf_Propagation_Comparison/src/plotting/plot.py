@@ -15,7 +15,7 @@ from plotting.DataLoader_def import DataLoader
 from plotting.DataProcessor_def import DataProcessor
 
 
-RTN_DOWNSAMP_FAC: int = 5
+RTN_DOWNSAMP_FAC: int = 10
 PLT_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_plt')
 PLT_HEIGHT = 6.0
 PLT_WIDTH = 16.0
@@ -42,27 +42,27 @@ def plot(cfg: Config) -> None:
     # Fetch and Load simulation data #
     ##################################
 
-    # Initialize data loader and processor objects
-    data_loader = DataLoader()
+    # # Initialize data loader and processor objects
+    # data_loader = DataLoader()
 
-    if not cfg.bypass_sim_to_plot:
-        # plot results from this simulation 
-        data_timestamp = cfg.timestamp_str  
-    else:
-        # plot results from a previous simulation
-        data_timestamp = cfg.data_timestamp_to_plot
+    # if not cfg.bypass_sim_to_plot:
+    #     # plot results from this simulation 
+    #     data_timestamp = cfg.timestamp_str  
+    # else:
+    #     # plot results from a previous simulation
+    #     data_timestamp = cfg.data_timestamp_to_plot
 
-    # Get all datafiles with the corresponding timestamp
-    datafiles_to_plot = data_loader.get_datafiles_by_timestamp(data_timestamp)
+    # # Get all datafiles with the corresponding timestamp
+    # datafiles_to_plot = data_loader.get_datafiles_by_timestamp(data_timestamp)
     
-    # Load simulation data
-    skf_sim_data, bsk_sim_data = data_loader.load_and_separate_data(datafiles_to_plot)
+    # # Load simulation data
+    # skf_sim_data, bsk_sim_data = data_loader.load_and_separate_data(datafiles_to_plot)
     
     ############
     # Plotting #
     ############
 
-    # plot_groundtrack_comparison_start_stop(cfg, skf_sim_data, bsk_sim_data, 20, 24)
+    # plot_groundtrack_comparison_start_stop(cfg, skf_sim_data, bsk_sim_data, 160, 168)
 
     # plot_groundtrack_comparison(cfg, skf_sim_data, bsk_sim_data)
 
@@ -173,39 +173,62 @@ def plot(cfg: Config) -> None:
     #######################################
     # Exponential atmosphere model tuning #
     #######################################
-    # Different scale heights
-    bsk_data_timestamps = [("20260128_201056", "Bsk: H0=7200, SH4, Drag"),
-                        #    ("20260128_202042", "Bsk: H0=14000, SH4, Drag"),
-                        #    ("20260128_202314", "Bsk: H0=15000, SH4, Drag"),
-                        #    ("20260128_202902", "Bsk: H0=15150, SH4, Drag"),
-                           ("20260128_203157", "Bsk: H0=15180, SH4, Drag"),
-                        #    ("20260128_202531", "Bsk: H0=15200, SH4, Drag"),
-                           ("20260128_201713", "Bsk: H0=15472.3, SH4, Drag"),
-                        #    ("20260128_212400", "Bsk: H0=15180.0, All"),
-                        #    ("20260202_132014", "Bsk: H0=15180, SH2, Drag"),
-                        #    ("20260203_145648", "Bsk: ExpAtm=Earth planet env, SH4, Drag"), # Give the same respone as 20260128_201056
-                        #    ("20260204_143518", "Bsk: MSIS atm, SH4, Drag"), # 1st implementation attempt
-                           ("20260204_185210", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.06m2"), # After adding global/persistent msis messages
-                        #    ("20260204_205523", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-                           ("20260204_210619", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.12m2"),
-                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-                        #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+    # # Different scale heights
+    # bsk_data_timestamps = [("20260128_201056", "Bsk: H0=7200, SH4, Drag"),
+    #                     #    ("20260128_202042", "Bsk: H0=14000, SH4, Drag"),
+    #                     #    ("20260128_202314", "Bsk: H0=15000, SH4, Drag"),
+    #                     #    ("20260128_202902", "Bsk: H0=15150, SH4, Drag"),
+    #                        ("20260128_203157", "Bsk: H0=15180, SH4, Drag"),
+    #                     #    ("20260128_202531", "Bsk: H0=15200, SH4, Drag"),
+    #                        ("20260128_201713", "Bsk: H0=15472.3, SH4, Drag"),
+    #                     #    ("20260128_212400", "Bsk: H0=15180.0, All"),
+    #                     #    ("20260202_132014", "Bsk: H0=15180, SH2, Drag"),
+    #                     #    ("20260203_145648", "Bsk: ExpAtm=Earth planet env, SH4, Drag"), # Give the same respone as 20260128_201056
+    #                     #    ("20260204_143518", "Bsk: MSIS atm, SH4, Drag"), # 1st implementation attempt
+    #                        ("20260204_185210", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.06m2"), # After adding global/persistent msis messages
+    #                     #    ("20260204_205523", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+    #                        ("20260204_210619", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.12m2"),
+    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
+    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
                            
+    #                        ]
+    # base_label = "Skf: SGP4 (base)"
+    # skf_base_data_timestamp = cfg.old_skf_data_timestamp
+
+
+    ##############################
+    # Skf / Bsk Final Comparison #
+    ##############################
+    # Different scale heights
+    bsk_data_timestamps = [
+                        #    ("20260216_194505", "Bsk: All, (w. Exp atm H0=7200), dt=1s, RKF78"),
+                        #    ("20260216_193340", "Bsk: All (w. Exp atm H0=15180), dt=1s, RKF78"),
+                           ("20260216_145853", "Bsk: All (w. MSIS atm), dt=1s, RKF78"),
+                        #    ("20260216_191759", "Bsk: All (w. MSIS atm), dt=5s, RKF78"), # Yeah, 5s is almost as accurate as 1s (200m diff after 7 days)
+                        #    ("20260216_221932", "Bsk: All, (w. SH2, Exp atm H0=7200), dt=1s, RKF78"),
+                        #    ("20260216_145853", "Bsk: All, dt=1s, RKF78"),
+                        #    ("20260216_145853", "Bsk: All, dt=1s, RKF78"),
                            ]
     base_label = "Skf: SGP4 (base)"
     skf_base_data_timestamp = cfg.old_skf_data_timestamp
 
+
     
-    plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+
+    
+    # # plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # # plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_simulator_state_mag_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
-                                                     view_lon_min=-180,
-                                                     view_lon_max=180,
-                                                     view_lat_min=-90,
-                                                     view_lat_max=90)
-    # plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # # plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
+                                                    #  start_plot_time_hours=160.0,
+                                                    #  end_plot_time_hours=168,
+                                                    #  view_lon_min=-3.0,
+                                                    #  view_lon_max=33.0,
+                                                    #  view_lat_min=56.0,
+                                                    #  view_lat_max=73.0
+                                                    #  )
     # plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_rel_vel_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
@@ -1542,17 +1565,21 @@ def plot_rel_pos_multi_sim_diff_no_radial(
     # Top: Along-track (T)
     for label, _, color in datasets:
         ax_T.plot(t_skf, diffs_T[label], label=label, color=color, linewidth=1.5)
-    ax_T.set_ylabel("RTN Δy_rel (m)")
-    ax_T.set_title("Along-track (T) simulator difference (y_rel - y_rel_base)")
+    ax_T.set_ylabel(
+        r"$y_{\mathrm{rel,Bsk}} - y_{\mathrm{rel,Skf}}\;[\mathrm{m}]$"
+    )
+    ax_T.set_title("RTN Along-Track (T) Difference")
     ax_T.grid(True, alpha=0.3)
     # ax_T.legend(ncol=2)
 
     # Middle: Cross-track (N)
     for label, _, color in datasets:
         ax_N.plot(t_skf, diffs_N[label], label=label, color=color, linewidth=1.5)
-    ax_N.set_ylabel("RTN Δz_rel (m)")
+    ax_N.set_ylabel(
+        r"$z_{\mathrm{rel,Bsk}} - z_{\mathrm{rel,Skf}}\;[\mathrm{m}]$"
+    )
     ax_N.set_xlabel("Time (hours)")
-    ax_N.set_title("Cross-track (N) simulator difference (z_rel - z_rel_base)")
+    ax_N.set_title("RTN Cross-Track (N) Difference")
     ax_N.grid(True, alpha=0.3)
     # ax_N.legend(ncol=2)
 
@@ -1568,7 +1595,7 @@ def plot_rel_pos_multi_sim_diff_no_radial(
     )
 
     fig.suptitle(
-        f"Simulator Comparison: Leader-Follower RTN Relative Position\n"
+        f"Formation-Relative Leader-Follower Position Differences: Full Basilisk Configuration vs. Skyfield\n"
         f"Leader: {chief_sat_name}, Follower: {follower_name}"
     )
 
@@ -1939,7 +1966,7 @@ def plot_alt_multi_sim_diff(
 
     # ---- Constants ----
     # Mean Earth radius [m]
-    EARTH_MEAN_RADIUS_M = 6378137.0
+    EARTH_MEAN_RADIUS_M = 6378136.6 # [m] WGS-84 equatorial radius
 
     # --------- Load Skyfield baseline ---------
     skf_stamp = f"{skf_base_data_timestamp}_skf"
@@ -2035,8 +2062,10 @@ def plot_alt_multi_sim_diff(
         ax_diff.plot(t_skf, alt_diffs[label], label=label, color=color, linewidth=1.5)
 
     ax_diff.set_xlabel("Time (hours)")
-    ax_diff.set_ylabel("Δ Altitude vs Baseline (m)")
-    ax_diff.set_title("Simulator Difference in Altitude")
+    ax_diff.set_ylabel(
+        r"$\text{alt}_{\mathrm{Bsk}} - \text{alt}_{\mathrm{Skf}}\;[\mathrm{m}]$"
+    )
+    # ax_diff.set_title("Simulator Difference in Altitude")
     ax_diff.grid(True, alpha=0.3)
 
     # ---- Single shared legend in top-right of the plot ----
@@ -2051,8 +2080,7 @@ def plot_alt_multi_sim_diff(
     )
 
     fig.suptitle(
-        f"Altitude Simulator Difference for the Leader Spacecraft\n"
-        f"Leader: {chief_sat_name}"
+        f"Altitude Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2342,8 +2370,10 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     for label, _, _, _, color in datasets:
         ax_posdiff.plot(t_skf, pos_diffs[label], label=label, color=color, linewidth=1.5)
 
-    ax_posdiff.set_ylabel("ECI ||Δr|| (km)")
-    ax_posdiff.set_title("Simulator Difference Position Delta Magnitude (||r - r_base||)")
+    ax_posdiff.set_ylabel(
+        r"$\|r_{\mathrm{Bsk}} - r_{\mathrm{Skf}}\|\;[\mathrm{km}]$"
+    )
+    ax_posdiff.set_title("ECI Position Difference Magnitude")
     ax_posdiff.grid(True, alpha=0.3)
 
     # Bottom: velocity delta magnitude
@@ -2351,8 +2381,10 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
         ax_veldiff.plot(t_skf, vel_diffs[label], label=label, color=color, linewidth=1.5)
 
     ax_veldiff.set_xlabel("Time (hours)")
-    ax_veldiff.set_ylabel("ECI ||Δv|| (m/s)")
-    ax_veldiff.set_title("Simulator Difference Velocity Delta Magnitude (||v - v_base||)")
+    ax_veldiff.set_ylabel(
+        r"$\|v_{\mathrm{Bsk}} - v_{\mathrm{Skf}}\|\;[\mathrm{m/s}]$"
+    )
+    ax_veldiff.set_title("ECI Velocity Difference Magnitude")
     ax_veldiff.grid(True, alpha=0.3)
 
     # ---- Single shared legend ----
@@ -2367,8 +2399,7 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     )
 
     fig.suptitle(
-        f"ECI State Delta Magnitude Simulator Difference for the Leader Spacecraft\n"
-        f"Leader: {chief_sat_name}"
+        f"Earth-Relative State Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2481,8 +2512,10 @@ def plot_multi_sim_pos_sim_diff_mag(
         ax.plot(t_skf, pos_diffs[label], label=label, color=color, linewidth=1.5)
 
     ax.set_xlabel("Time (hours)")
-    ax.set_ylabel("ECI ||Δr|| (km)")
-    ax.set_title("Simulator Difference Position Delta Magnitude (||r - r_base||)")
+    ax.set_ylabel(
+        r"$\|r_{\mathrm{Bsk}} - r_{\mathrm{Skf}}\|\;[\mathrm{km}]$"
+    )
+    ax.set_title("ECI Position Difference Magnitude")
     ax.grid(True, alpha=0.3)
 
     ax.legend(
@@ -2492,8 +2525,7 @@ def plot_multi_sim_pos_sim_diff_mag(
     )
 
     fig.suptitle(
-        f"ECI State Delta Magnitude Simulator Difference for the Leader Spacecraft\n"
-        f"Leader: {chief_sat_name}"
+        f"Earth-Relative Position Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2509,10 +2541,10 @@ def plot_groundtrack_multi_sim_comparison_start_stop(
     base_label: str,
     start_plot_time_hours: float = 90.0,
     end_plot_time_hours=96.0,
-    view_lon_min: float = 3.0,
-    view_lon_max: float = 33.0,
-    view_lat_min: float = 56.0,
-    view_lat_max: float = 73.0,
+    view_lon_min: float = -180,
+    view_lon_max: float = 180,
+    view_lat_min: float = -90,
+    view_lat_max: float = 90,
 ) -> None:
     """
     Compare multiple Basilisk simulations against a single Skyfield baseline
@@ -2674,7 +2706,7 @@ def plot_groundtrack_multi_sim_comparison_start_stop(
         )
 
     ax.set_title(
-        f"Groundtrack comparison (leader) — {chief_sat_name}\n"
+        f"Groundtrack comparison: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'\n"
         f"t ∈ [{start_plot_time_hours:.2f}, {end_plot_time_hours:.2f}] h"
     )
     ax.legend(loc="upper right")

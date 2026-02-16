@@ -41,7 +41,7 @@ class Satellite:
 
     def extract_initial_states_and_update(self, sim_object_data: SimObjData) -> None:
 
-        logging.debug(f"Extracting initial states for {sim_object_data.satellite_name}")
+        logging.debug(f"[SAT] Extracting initial states for {sim_object_data.satellite_name}")
 
         # Normalize time array to always be 1D: shape (n,)
         time = np.asarray(sim_object_data.time).ravel()

@@ -32,7 +32,7 @@ class SkyfieldSimulator():
     """
 
     def __init__(self, cfg: Config) -> None:
-        logging.debug("Setting up Skyfield simulation...")
+        logging.debug("[SKF] Setting up Skyfield simulation...")
 
         ###################################
         # Configure simulation parameters #
@@ -124,12 +124,12 @@ class SkyfieldSimulator():
         self.satellite_names: list[str] = satellite_names
         self.sim_data: Optional[SimData] = None
         
-        logging.debug("Skyfield simulation setup complete")
+        logging.debug("[SKF] Skyfield simulation setup complete")
 
 
     def run(self) -> None:
 
-        logging.debug("Running the Skyfield simulation...")
+        logging.debug("[SKF] Running Skyfield simulation...")
 
         #################################################################################
         # Run sgp4 propagation to get position and velocity at all simualtion timesteps #
@@ -181,7 +181,7 @@ class SkyfieldSimulator():
         # Write simulation data to file
         self.output_data()
 
-        logging.debug("Skyfield simulation complete")
+        logging.debug("[SKF] Skyfield simulation complete")
 
 
     def output_data(self) -> None:
@@ -204,7 +204,7 @@ class SkyfieldSimulator():
         """
 
         if cfg.use_old_skf_data:
-            logging.debug("Skipping the Skyfield simulation. Old Skyfield simulation data will be loaded instead...")
+            logging.debug("[SKF] Skipping the Skyfield simulation. Old Skyfield simulation data will be loaded instead...")
 
             # Initialize data loader and processor objects
             data_loader = DataLoader()
@@ -290,7 +290,7 @@ class SkyfieldSimulator():
         if not len(sat_tle_idx_at_times) == len(times):
             raise ValueError("'sat_tle_idx_at_times' not the same length as 'times'")
         
-        logging.debug("TLE series indecies pre-determined for all times in the simulation duration")
+        logging.debug("[SKF] TLE series indecies pre-determined for all times in the simulation duration")
 
         return sat_tle_idx_at_times
 

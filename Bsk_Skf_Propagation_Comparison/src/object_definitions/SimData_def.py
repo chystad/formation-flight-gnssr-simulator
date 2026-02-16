@@ -123,7 +123,7 @@ class SimData:
                 g["vel"].attrs["units"] = "m/s"
                 g.attrs["description"] = "Satellite trajectory data" # Specify frame here
 
-            logging.debug(f"Data written to: {file_path}")
+            logging.debug(f"[DAT] Data written to: {file_path}")
         return
 
 

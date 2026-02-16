@@ -68,7 +68,7 @@ class TLE:
 
         # If all follower TLE series files have been verified, simply return a list of all their paths
         if verified_follower_tles:
-            logging.debug("No need to generate new follower TLE series files")
+            logging.debug("[TLE] No need to generate new follower TLE series files")
             return out_follower_tle_str_paths
         
         # Generate new TLE files for all followers
@@ -103,7 +103,7 @@ class TLE:
                         out.write(line1 if line1.endswith("\n") else line1 + "\n")
                         out.write(line2_mod)
 
-                logging.debug(f"Generated TLE file for 'follower-{follower_i}'")
+                logging.debug(f"[TLE] Generated TLE file for 'follower-{follower_i}'")
 
         return out_follower_tle_str_paths
     
@@ -210,7 +210,7 @@ class TLE:
         # Once the leader TLE has been verified, edit flag attribute
         if exists and correct_format and correct_sorting:
             self.verified_leader_TLE_series_file = True
-            logging.debug(f"Verified leader TLE series file (Path: {leader_tle_path})")
+            logging.debug(f"[TLE] Verified leader TLE series file (Path: {leader_tle_path})")
         else:
             # This should never be reached, but is added to capture any unexpected scenarios
             raise ValueError(f"""The leader TLE series file did not pass verification. Function terminated with flags:
@@ -241,17 +241,17 @@ class TLE:
 
         # Make sure the leader TLE series file has been verified
         if not self.verified_leader_TLE_series_file:
-            logging.debug("Leader TLE series file not verified prior to this method call. Verifying...")
+            logging.debug("[TLE] Leader TLE series file not verified prior to this method call. Verifying...")
             self.verify_leader_TLE_series_file(leader_path)
 
 
         # --------------- 1) Follower TLE exists + is non-empy --------------- #
         if not follower_tle_path.exists():
-            logging.debug(f"Follower TLE series file does not exist at (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
+            logging.debug(f"[TLE] Follower TLE series file does not exist at (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
             return False
     
         if follower_tle_path.stat().st_size == 0:
-            logging.debug(f"Follower TLE series file exists, but is empty. (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
+            logging.debug(f"[TLE] Follower TLE series file exists, but is empty. (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
 
         exists = True
 
@@ -263,20 +263,20 @@ class TLE:
             with follower_tle_path.open("r", encoding="utf-8") as f:
                 follower_raw = f.readlines()
         except Exception as e:
-            logging.debug(f"Failed to read leader/follower TLE files: {e}")
+            logging.debug(f"[TLE] Failed to read leader/follower TLE files: {e}")
             return False
         
         if len(follower_raw) < 3:
             raise ValueError(f"Follower TLE series must contain at least one TLE (3 lines). Got {len(follower_raw)}. New follower TLE file(s) must be generated...")
 
         if len(follower_raw) % 3 != 0:
-            logging.debug(f"Follower TLE series structure invalid (not divisible by 3). New follower TLE file(s) must be generated...")
+            logging.debug(f"[TLE] Follower TLE series structure invalid (not divisible by 3). New follower TLE file(s) must be generated...")
             return False
         
         if len(follower_raw) != len(leader_raw):
             logging.debug(
-                f"Follower TLE series has different length than leader. "
-                f"Follower lines={len(follower_raw)}, leader lines={len(leader_raw)}. New follower TLE file(s) must be generated..."
+                f"[TLE] Follower TLE series has different length than leader. "
+                f"[TLE] Follower lines={len(follower_raw)}, leader lines={len(leader_raw)}. New follower TLE file(s) must be generated..."
             )
             return False
 
@@ -289,10 +289,10 @@ class TLE:
             try:
                 follower_i = int(first_name.split("-")[1])
             except Exception:
-                logging.debug(f"Could not get follower index from first line of (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
+                logging.debug(f"[TLE] Could not get follower index from first line of (Path: {follower_tle_path}). New follower TLE file(s) must be generated...")
                 return False
         else:
-            logging.debug(f"Satellite names in follower TLE files does not start with 'follower-'. New follower TLE file(s) must be generated...")
+            logging.debug(f"[TLE] Satellite names in follower TLE files does not start with 'follower-'. New follower TLE file(s) must be generated...")
             return False
         
         leader_epoch_keys: list[tuple[int, float]] = []
@@ -314,15 +314,15 @@ class TLE:
 
             # Follower name line: require it to be non-empty and consistent across file
             if not follower_name:
-                logging.debug(f"Empty follower name at block starting line {b+1} in {follower_tle_path}. New follower TLE file(s) must be generated...")
+                logging.debug(f"[TLE] Empty follower name at block starting line {b+1} in {follower_tle_path}. New follower TLE file(s) must be generated...")
                 return False
 
             # Basic "standard" checks on follower line1/line2
             if not self._is_tle_line1(follower_l1):
-                logging.debug(f"Invalid follower TLE line1 at block starting line {b+1}: {follower_l1!r}. New follower TLE file(s) must be generated...")
+                logging.debug(f"[TLE] Invalid follower TLE line1 at block starting line {b+1}: {follower_l1!r}. New follower TLE file(s) must be generated...")
                 return False
             if not self._is_tle_line2(follower_l2):
-                logging.debug(f"Invalid follower TLE line2 at block starting line {b+1}: {follower_l2!r}. New follower TLE file(s) must be generated...")
+                logging.debug(f"[TLE] Invalid follower TLE line2 at block starting line {b+1}: {follower_l2!r}. New follower TLE file(s) must be generated...")
                 return False
 
             # Checksum validity (both lines)
@@ -330,7 +330,7 @@ class TLE:
                 self._validate_checksum(follower_l1, f"Follower TLE line 1 (block starting line {b+1})")
                 self._validate_checksum(follower_l2, f"Follower TLE line 2 (block starting line {b+1})")
             except Exception as e:
-                logging.debug(f"Follower checksum validation failed: {e}. New follower TLE file(s) must be generated...")
+                logging.debug(f"[TLE] Follower checksum validation failed: {e}. New follower TLE file(s) must be generated...")
                 return False
 
             # Satnum must match within follower block
@@ -348,11 +348,11 @@ class TLE:
                 leader_epoch_keys.append(self._parse_epoch_key_from_line1(leader_l1))
                 follower_epoch_keys.append(self._parse_epoch_key_from_line1(follower_l1))
             except Exception as e:
-                logging.debug(f"Epoch parsing failed during follower verification: {e}")
+                logging.debug(f"[TLE] Epoch parsing failed during follower verification: {e}")
                 return False
             
             if leader_epoch_keys != follower_epoch_keys:
-                logging.debug("Follower epochs do not match leader epochs exactly. New follower TLE file(s) must be generated...")
+                logging.debug("[TLE] Follower epochs do not match leader epochs exactly. New follower TLE file(s) must be generated...")
                 return False
             
 
@@ -361,7 +361,7 @@ class TLE:
                 M_leader = self.parse_mean_anomaly_from_line2(leader_l2)
                 expected_l2 = self.set_mean_anomaly_and_fix_checksum(leader_l2 + "\n", M_leader + shift_deg).rstrip("\n")
             except Exception as e:
-                logging.debug(f"Failed generating expected follower line2: {e}")
+                logging.debug(f"[TLE] Failed generating expected follower line2: {e}")
                 return False
 
             # Compare entire line2 (this implicitly checks mean anomaly AND checksum AND that no other fields changed)
@@ -377,10 +377,10 @@ class TLE:
 
         # Once the TLE files are verified, log confirmation
         if exists and correct_structure_n_data:
-            logging.debug(f"Verified follower TLE series file (Path: {follower_tle_path})")
+            logging.debug(f"[TLE] Verified follower TLE series file (Path: {follower_tle_path})")
             return True
         else:
-            logging.debug(f"Follower TLE series file (Path: {follower_tle_path}) failed verification. New follower TLE file(s) must be generated...")
+            logging.debug(f"[TLE] Follower TLE series file (Path: {follower_tle_path}) failed verification. New follower TLE file(s) must be generated...")
             return False
         
     

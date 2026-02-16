@@ -190,7 +190,7 @@ class MsisInputUpdater(sysModel.SysModel):
                 f"Missing {len(missing)} day(s); first missing: {missing[0]}, last missing: {missing[-1]}."
             )
 
-        logging.debug(f"Space weather parameters has been parsed and loaded in range {load_start}..{load_end}")
+        logging.debug(f"[BSK] Space weather parameters has been parsed and loaded in range {load_start}..{load_end}")
         return data
     
 
@@ -340,7 +340,7 @@ class BasiliskSimulator:
     =========================================================================================================
     """
     def __init__(self, cfg: Config) -> None:
-        logging.debug("Setting up Basilisk simulation...")
+        logging.debug("[BSK] Setting up Basilisk simulation...")
         
         ###############
         # Load config #
@@ -530,7 +530,7 @@ class BasiliskSimulator:
 
     def run(self) -> None:
         # Execute the simulation
-        logging.debug("Basilisk simulation running...")
+        logging.debug("[BSK] Running Basilisk simulation...")
        
         self.scSim.ExecuteSimulation()
         # Note that this module simulates both the translational and rotational motion of the spacecraft.
@@ -581,7 +581,7 @@ class BasiliskSimulator:
         # Write simulation data to file
         self.output_data()
 
-        logging.debug("Basilisk simulation complete")
+        logging.debug("[BSK] Basilisk simulation complete")
 
         ############### DEBUG ###############
         # # Plot initial positions of the 1st satellite, the sun, the earth and the moon (if defined)
@@ -606,7 +606,7 @@ class BasiliskSimulator:
         # print(np.size(sat_0_dens_data))
 
         # self.DEBUG_plot_msis_atm_density()
-        self.DEBUG_plot_msis_atm_density_against_altitude()
+        # self.DEBUG_plot_msis_atm_density_against_altitude()
         ############################################
 
 
@@ -631,7 +631,7 @@ class BasiliskSimulator:
         Always generate the Earth and Sun, but disable the Sun's gravity if useSun3rdBody == False. 
         The Moon is generated iff useMoon3rdBody == True. 
         Modify the Earth's gravity body to include spherical harmonics iff useSphericalHarmonics == True. 
-        Always initialize SPICE interface for accurate positions for the gravitational bodies.
+        Always initialize SPICE interface for accurate positions for t he gravitational bodies.
         
         :param self: 
         :return: gravBodyFactory instance 'gravFactory'
@@ -648,10 +648,13 @@ class BasiliskSimulator:
         # Disable the Sun's gravity if useSun3rdBody == False
         if not self.cfg.b_set.useSun3rdBody:
             sun.mu = 0
+        else:
+            logging.debug("[BSK] Sun 3rd body perturbation initialized")
 
         # Create the Moon only if useMoon3rdBody == True
         if self.cfg.b_set.useMoon3rdBody:
             moon = gravFactory.createMoon()
+            logging.debug("[BSK] Moon 3rd body perturbation initialized")
         
         # Set Earth as the central gravitational body
         earth.isCentralBody = True
@@ -663,6 +666,8 @@ class BasiliskSimulator:
                 GRAV_COEFF_FILE_PATH, 
                 self.cfg.b_set.sphericalHarmonicsDegree
             )
+
+            logging.debug(f"[BSK] Earth created with spherical harmonics gravity model of order and degree {self.cfg.b_set.sphericalHarmonicsDegree}")
 
             # The value 2 indicates that the first two harmonics, excluding the 0th order harmonic,
             # are included.  This harmonics data file only includes a zeroth order and J2 term.
@@ -683,6 +688,8 @@ class BasiliskSimulator:
         
         # Schedule object to simualtion process
         self.scSim.AddModelToTask(self.simTaskName, spiceObj)
+
+        logging.debug("[BSK] Spice interface initialized for all massive bodies")
 
         return gravFactory, spiceObj
 
@@ -757,7 +764,7 @@ class BasiliskSimulator:
             self.msisInputUpdater = MsisInputUpdater(self.cfg, self.msisSwWriters)
             self.scSim.AddModelToTask("msisInputUpdater", self.msisInputUpdater)
 
-            logging.debug("MSIS atmosphere model has been initialized")
+            logging.debug("[BSK] MSIS atmosphere model has been initialized")
 
 
         # Using Exponential density atmosphere
@@ -768,18 +775,18 @@ class BasiliskSimulator:
 
             # Exponential atmosphere parameters
             atm.planetRadius = EARTH_RADIUS
-            atm.scaleHeight = 15180.0       # [m] typical scale height (7200 before tuning)
+            atm.scaleHeight = 7200.0       # [m] typical scale height (7200 before tuning)
             atm.baseDensity = 1.225         # [kg/m^3] density at 0 m
             atm.envMinReach = 0.0           # [m]
             atm.envMaxReach = 1000e3        # [m] cap model above 1000 km
 
             # simSetPlanetEnvironment.exponentialAtmosphere(atm, "earth") # Will give the same response as scaleHeight = 7200
-            logging.debug("Exponential atmosphere model has been initialized")
+            logging.debug("[BSK] Exponential atmosphere model has been initialized")
 
         
         # If the simulation is configured to not use drag, return None
         else:
-            logging.debug("No atmosphere model has been initialized")
+            logging.debug("[BSK] No atmosphere model has been initialized")
             return None
         
         # Add to task
@@ -816,13 +823,13 @@ class BasiliskSimulator:
         use_exp = self.cfg.b_set.useExponentialDensityDrag
         
         if ((not use_msis) and (not use_exp)) or (atm is None):
-            logging.debug("no atmosphere model initialized")
+            logging.debug("[BSK] no atmosphere model initialized")
             return scObj
         
         if use_msis and (not isinstance(atm, msisAtmosphere.MsisAtmosphere)):
             raise TypeError("Basilisk is configured to use an MSIS atmosphere model, but atmosphere object 'atm' is not of type 'msisAtmosphere.MsisAtmosphere'")
         
-        elif use_exp and (not isinstance(atm, exponentialAtmosphere.ExponentialAtmosphere)):
+        elif use_exp and (not use_msis) and (not isinstance(atm, exponentialAtmosphere.ExponentialAtmosphere)):
             raise TypeError("Basilisk is configured to use an Exponential atmosphere model, but atmosphere object 'atm' is not of type 'exponentialAtmosphere.ExponentialAtmosphere'")
 
         # ---- Drag effector (exponential density + cannonball) ----
@@ -881,6 +888,8 @@ class BasiliskSimulator:
         # Schedule object to simualtion process
         self.scSim.AddModelToTask(self.simTaskName, eclipseObj) 
 
+        logging.debug("[BSK] Eclipse model has been initialized")
+
 
         ####### FOR DEBUG ###############################
         # earthMsg = spiceObj.planetStateOutMsgs[0]
@@ -888,7 +897,7 @@ class BasiliskSimulator:
         # try:
         #     moonMsg = spiceObj.planetStateOutMsgs[2]
         # except:
-        #     logging.debug("The Moon gravitational entity is not defined in the SPICE interface")
+        #     logging.debug("[BSK] The Moon gravitational entity is not defined in the SPICE interface")
         # self.sunRec = sunMsg.recorder(samplingTime)
         # self.earthRec = earthMsg.recorder(samplingTime)
         # try:
@@ -947,6 +956,8 @@ class BasiliskSimulator:
         scObj.addDynamicEffector(srp)
         self.scSim.AddModelToTask(self.simTaskName, srp)
 
+        logging.debug("[BSK] Solar radiation pressure (SRP) model initialized")
+
         return scObj
 
 
@@ -957,13 +968,13 @@ class BasiliskSimulator:
         # Select integration method
         match integration_method:
             case "RKF45":
-                logging.debug("Selecting RKF45 numerical integrator")
+                logging.debug(f"[BSK] Selecting RKF45 numerical integrator for {scObj.ModelTag}")
                 integratorObj = svIntegrators.svIntegratorRKF45(scObj)
             case "RKF78":
-                logging.debug("Selecting RKF78 numerical integrator")
+                logging.debug(f"[BSK] Selecting RKF78 numerical integrator for {scObj.ModelTag}")
                 integratorObj = svIntegrators.svIntegratorRKF78(scObj)
             case _:
-                logging.debug("Selecting defualt RK4 numerical integrator")
+                logging.debug(f"[BSK] Selecting defualt RK4 numerical integrator for {scObj.ModelTag}")
                 return scObj # Use standard integration method RK4
         
         # Set the object's non-default integration method
