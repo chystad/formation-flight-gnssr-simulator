@@ -1,6 +1,6 @@
 # These configuration options are currently in configs/default.yaml
 BASILISK_SIMULATION:
-  deltaT:                     1 # Solver time step [seconds]
+  deltaT:                     5 # Solver time step [seconds]
   integrator:                 "RKF78" # [RK4(Default), RKF45, RKF78]
 
   sphericalHarmonicsDegree:   4 # int >= 2

@@ -17,8 +17,8 @@ from plotting.DataProcessor_def import DataProcessor
 
 RTN_DOWNSAMP_FAC: int = 10
 PLT_SAVE_FOLDER_PATH = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_plt')
-PLT_HEIGHT = 6.0
-PLT_WIDTH = 16.0
+PLT_HEIGHT = 6.0 # 6
+PLT_WIDTH = 16.0 # 16
 
 
 def plot(cfg: Config) -> None:
@@ -72,156 +72,114 @@ def plot(cfg: Config) -> None:
     
     # plot_rel_pos_comparison(cfg, skf_sim_data, bsk_sim_data)
 
-    # plot_simulator_rel_state_diff(cfg, skf_sim_data, bsk_sim_data)
+    # plot_simu6lator_rel_state_diff(cfg, skf_sim_data, bsk_sim_data)
 
     # plot_altitude_comparison(cfg, skf_sim_data, bsk_sim_data)
 
     # plot_simulator_state_abs_diff(cfg, skf_sim_data, bsk_sim_data)
 
 
-    
-
-    #####################
-    # Experiment 1 data #
-    #####################
-    # bsk_data_timestamps = [("20251216_084208", "Bsk: RKF78, All")]
-    #                        #("20251216_092602", "Bsk: RK4, All")]
-    # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = "20251216_073738"
-
-
-    #####################
-    # Experiment 2 data #
-    #####################
-    # # For spherical harmonics only against Skyfield
-    # bsk_data_timestamps = [("20251216_110041", "Bsk: RKF78, All"),
-    #                        ("20251216_110616", "Bsk: RKF78, SH2"),
-    #                        ("20251216_110859", "Bsk: RKF78, SH3"),
-    #                        ("20251216_111031", "Bsk: RKF78, SH4"),]
-    #                     #    ("20251216_111211", "Bsk: RKF78, SH4 + Drag"),
-    #                     #    ("20251216_111309", "Bsk: RKF78, SH4 + SRP"),
-    #                     #    ("20251216_111726", "Bsk: RKF78, SH4 + Sun"),
-    #                     #    ("20251216_111818", "Bsk: RKF78, SH4 + Moon")]
-    # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = cfg.old_skf_data_timestamp
-
-    # # For different combinations of 2nd order spherical harmonics and other perturbations
+    ####################################################################
+    # Verify that new repo can replicate specialization project result #
+    ####################################################################
     # bsk_data_timestamps = [
-    #                     #    ("20251216_110616", "Bsk: RKF78, SH2"),
-    #                     #    ("20251216_113404", "Bsk: RKF78, SH2 + Drag"),
-    #                     #    ("20251216_113459", "Bsk: RKF78, SH2 + SRP"),
-    #                     #    ("20251216_113555", "Bsk: RKF78, SH2 + Sun"),
-    #                     #    ("20251216_113645", "Bsk: RKF78, SH2 + Moon"),
-    #                     #    ("20251216_114138", "Bsk: RKF78, SH2 + Rest"),
-    #                        ("20251216_111211", "Bsk: RKF78, SH4 + Drag"),
-    #                        ("20251216_111309", "Bsk: RKF78, SH4 + SRP"),
-    #                        ("20251216_111726", "Bsk: RKF78, SH4 + Sun"),
-    #                        ("20251216_111818", "Bsk: RKF78, SH4 + Moon"),
-    #                        ("20251216_110041", "Bsk: RKF78, All")]
-    # base_label = "Bsk: RKF78, SH4 (base)"
-    # skf_base_data_timestamp = "20251216_111031" # REMEMBER TO SELECT THE CORRECT STRING-ENDING IN PLOTTING FUNCTIONS!!!
-
-
-    # # Total combination of all perturbations:
-    # bsk_data_timestamps = [
-    #                        ("20251216_110616", "Bsk: RKF78, SH2"),
-    #                        ("20251216_110859", "Bsk: RKF78, SH3"),
-    #                        ("20251216_111031", "Bsk: RKF78, SH4"),
-    #                     #    ("20251216_111211", "Bsk: RKF78, SH4 + Drag"),
-    #                     #    ("20251216_111309", "Bsk: RKF78, SH4 + SRP"),
-    #                     #    ("20251216_111726", "Bsk: RKF78, SH4 + Sun"),
-    #                     #    ("20251216_111818", "Bsk: RKF78, SH4 + Moon"),
-    #                        ("20251216_110041", "Bsk: RKF78, All")]
-    # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = cfg.old_skf_data_timestamp # REMEMBER TO SELECT THE CORRECT STRING-ENDING IN PLOTTING FUNCTIONS!!!
-    # base_label = "Bsk: RKF78, SH4 (base)"
-    # skf_base_data_timestamp = "20251216_111031" 
-    # base_label = "Bsk: RKF78, SH2 (base)"
-    # skf_base_data_timestamp = "20251216_110616"
-
-
-    #####################
-    # Experiment 3 data #
-    #####################
-    # # For different integrator configurations
-    # bsk_data_timestamps = [("20251216_150753", "Bsk: RK4, dt=50, All"),
-    #                        ("20251216_150708", "Bsk: RK4, dt=20, All"),
-    #                        ("20251216_150600", "Bsk: RK4, dt=5, All"),
-    #                        ("20251216_150328", "Bsk: RK4, dt=1, All"),
-    #                        ("20251216_150937", "Bsk: RKF45, All"),
-    #                        ("20251216_110041", "Bsk: RKF78, All"),]
-    # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = cfg.old_skf_data_timestamp
-   
-
-    ###############################
-    # Experiment combination data #
-    ###############################
-    # # For spherical harmonics only against Skyfield
-    # bsk_data_timestamps = [("20251216_110616", "Bsk: RKF78, SH2"),
-    #                        ("20251216_110859", "Bsk: RKF78, SH3"),
-    #                        ("20251216_111031", "Bsk: RKF78, SH4"),
-    #                        ("20251216_111211", "Bsk: RKF78, SH4 + Drag"),
-    #                        ("20251216_111309", "Bsk: RKF78, SH4 + SRP"),
-    #                        ("20251216_111726", "Bsk: RKF78, SH4 + Sun"),
-    #                        ("20251216_111818", "Bsk: RKF78, SH4 + Moon"),
-    #                        ("20251216_110041", "Bsk: RKF78, All")]
-    # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = cfg.old_skf_data_timestamp
-
-
-    #######################################
-    # Exponential atmosphere model tuning #
-    #######################################
-    # # Different scale heights
-    # bsk_data_timestamps = [("20260128_201056", "Bsk: H0=7200, SH4, Drag"),
-    #                     #    ("20260128_202042", "Bsk: H0=14000, SH4, Drag"),
-    #                     #    ("20260128_202314", "Bsk: H0=15000, SH4, Drag"),
-    #                     #    ("20260128_202902", "Bsk: H0=15150, SH4, Drag"),
-    #                        ("20260128_203157", "Bsk: H0=15180, SH4, Drag"),
-    #                     #    ("20260128_202531", "Bsk: H0=15200, SH4, Drag"),
-    #                        ("20260128_201713", "Bsk: H0=15472.3, SH4, Drag"),
-    #                     #    ("20260128_212400", "Bsk: H0=15180.0, All"),
-    #                     #    ("20260202_132014", "Bsk: H0=15180, SH2, Drag"),
-    #                     #    ("20260203_145648", "Bsk: ExpAtm=Earth planet env, SH4, Drag"), # Give the same respone as 20260128_201056
-    #                     #    ("20260204_143518", "Bsk: MSIS atm, SH4, Drag"), # 1st implementation attempt
-    #                        ("20260204_185210", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.06m2"), # After adding global/persistent msis messages
-    #                     #    ("20260204_205523", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-    #                        ("20260204_210619", "Bsk: MSIS atm, SH4, Drag, leader A_D=0.12m2"),
-    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-    #                     #    ("", "Bsk: MSIS atm, SH4, Drag, leader A_D=10m2"),
-                           
+    #                        ("20260217_113854", "Bsk: All, dt=5s, RKF78, OLD SIM"),
+    #                     #    ("20260217_121904", "Bsk: All, dt=5s, RKF78, OLD TLE"),
+    #                        ("20260217_124140", "Bsk: All, (w. MSIS atm), dt=5s, RKF78, OLD TLE SERIES"),
+    #                     #    ("20260217_131017", "Bsk: All, (w. Exp atm H0=7200), dt=5s, RKF78, OLD TLE SERIES"),
+    #                        ("20260217_132830", "Bsk: All, (w. Exp atm H0=7200), dt=5s, RKF78, OLD TLE FILE"),
+    #                        ("20260217_140924", "Bsk: All, (w. Exp atm H0=7200), dt=5s, RKF78, OLD TLE SERIES, modified"),
     #                        ]
     # base_label = "Skf: SGP4 (base)"
     # skf_base_data_timestamp = cfg.old_skf_data_timestamp
 
 
-    ##############################
-    # Skf / Bsk Final Comparison #
-    ##############################
-    # Different scale heights
+    ##################################
+    # Ex1 Skf / Bsk Final Comparison #
+    ##################################
+    # bsk_data_timestamps = [
+    #                     #    ("20260217_113854", "Bsk: All (w. Exp atm, H0=7200), dt=5s, RKF78, OLD SIM"), # From old sim. For comparison.
+    #                        ("20260217_143841", "Bsk: All (w. MSIS atm, SH4), dt=5s, RKF78"),
+    # ]
+    # base_label = "Skf: SGP4 (base)"
+    # skf_base_data_timestamp = "20260217_143841"
+
+
+
+    ##################################
+    # Ex2 Skf / Bsk Final Comparison #
+    ##################################
+    # bsk_data_timestamps = [
+    #                     #    ("20260217_113854", "Bsk: All (w. Exp atm, H0=7200), dt=5s, RKF78, OLD SIM"), # From old sim. For comparison.
+    #                        ("20260217_151158", "Bsk: All (w. Exp atm H0=7200, SH4)"),
+    #                        ("20260217_151335", "Bsk: All (w. Exp atm H0=15180, SH4)"),
+    #                        ("20260217_151513", "Bsk: All (w. Exp atm H0=15472.3, SH4)"),
+    #                        ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_153838", "Bsk: All (Exp atm H0=7200, SH2)"),
+    #                     #    ("20260217_154016", "Bsk: All (Exp atm H0=15180, SH2)"),
+    #                     #    ("20260217_154144", "Bsk: All (w. Exp atm H0=15472.3, SH2)"),
+    #                     #    ("20260217_154343", "Bsk: All (w. MSIS atm, SH2)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+                           
+    # ]
+    # base_label = "Skf: SGP4 (base)"
+    # skf_base_data_timestamp = cfg.old_skf_data_timestamp
+
+
+    #####################################################################################
+    # Tuning satellite parameters to make Basilisk w. MSIS output match skyfield output #
+    #####################################################################################
+    # For startTime: 23.10.2025 22:19:30
+    # bsk_data_timestamps = [
+    #                     #    ("20260217_113854", "Bsk: All (w. Exp atm, H0=7200), dt=5s, RKF78, OLD SIM"), # From old sim. For comparison.
+    #                        ("20260217_151158", "Bsk: All (w. Exp atm H0=7200, SH4)"),
+    #                     #    ("20260217_151335", "Bsk: All (w. Exp atm H0=15180, SH4)"),
+    #                        ("20260217_151513", "Bsk: All (w. Exp atm H0=15472.3, SH4)"),
+    #                     #    ("20260217_143841", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260218_143511", "Bsk: All (w. MSIS atm, SH4), A_D=0.04"),
+    #                     #    ("20260218_145104", "Bsk: All (w. MSIS atm, SH4), A_D=0.02"),
+    #                     #    ("20260218_145645", "Bsk: All (w. MSIS atm, SH4), m_s=8.0"),
+    #                     #    ("20260218_150043", "Bsk: All (w. MSIS atm, SH4), m_s=9.0"),                
+    # ]
+    # base_label = "Skf: SGP4 (base)"
+    # skf_base_data_timestamp = "20260217_143841"
+
+    # For startTime: 01.01.2026 00:00:30
     bsk_data_timestamps = [
-                        #    ("20260216_194505", "Bsk: All, (w. Exp atm H0=7200), dt=1s, RKF78"),
-                        #    ("20260216_193340", "Bsk: All (w. Exp atm H0=15180), dt=1s, RKF78"),
-                           ("20260216_145853", "Bsk: All (w. MSIS atm), dt=1s, RKF78"),
-                        #    ("20260216_191759", "Bsk: All (w. MSIS atm), dt=5s, RKF78"), # Yeah, 5s is almost as accurate as 1s (200m diff after 7 days)
-                        #    ("20260216_221932", "Bsk: All, (w. SH2, Exp atm H0=7200), dt=1s, RKF78"),
-                        #    ("20260216_145853", "Bsk: All, dt=1s, RKF78"),
-                        #    ("20260216_145853", "Bsk: All, dt=1s, RKF78"),
-                           ]
+                           ("20260218_182701", "Bsk: All (w. Exp atm H0=7200, SH4)"),
+                           ("20260218_182511", "Bsk: All (w. Exp atm H0=15472.3, SH4)"),
+                        #    ("20260218_182925", "Bsk: All (w. MSIS atm, SH4)"),
+                        #    ("20260218_180948", "Bsk: All (w. MSIS atm, SH4), m_s = 9.0"),
+                        #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),
+                        #    ("20260218_183732", "Bsk: All (w. MSIS atm, SH4), m_s = 7.5"),
+                        #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),                   
+    ]
     base_label = "Skf: SGP4 (base)"
-    skf_base_data_timestamp = cfg.old_skf_data_timestamp
+    skf_base_data_timestamp = "20260218_180948"
 
 
+    #####################################################################################
+    # Misc #
+    #####################################################################################
+    # bsk_data_timestamps = [
+    #                     #    ("20260218_192909", "Bsk: All (w. MSIS atm, SH4), dt=10s, start=23.12.2025"),    
+    #                        ("20260218_194031", "Bsk: All (w. MSIS atm, SH4), dt=10s, start=01.12.2025"),    
+                                     
+    # ]
+    # base_label = "Skf: SGP4 (base)"
+    # skf_base_data_timestamp = "20260218_194031"
     
-
-    
-    # # plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # # plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_simulator_state_mag_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # # plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
+    # plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
                                                     #  start_plot_time_hours=160.0,
                                                     #  end_plot_time_hours=168,
                                                     #  view_lon_min=-3.0,
@@ -230,7 +188,7 @@ def plot(cfg: Config) -> None:
                                                     #  view_lat_max=73.0
                                                     #  )
     # plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    # plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_rel_vel_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
 
 #################################
@@ -2751,7 +2709,7 @@ def conditional_save_plot(cfg: Config, fig: Figure, plt_identifier: str) -> None
     save_path = PLT_SAVE_FOLDER_PATH / filename
 
     # Save figure
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    fig.savefig(save_path, dpi=1200, bbox_inches="tight")
 
     logging.debug(f"Saved figure: {filename}")
 

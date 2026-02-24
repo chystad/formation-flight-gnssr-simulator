@@ -274,17 +274,18 @@ class SkyfieldSimulator():
         next_midpoint = midpoints[next_midpoint_idx]
         last_midpoint_reached = False
         for i, t in enumerate(times):
-            if t.tt >= next_midpoint and not last_midpoint_reached:
-                if next_midpoint_idx < (len(midpoints)-1):
-                    next_midpoint_idx += 1
-                    next_midpoint = midpoints[next_midpoint_idx]
-                else:
-                    last_midpoint_reached = True
+
+            # Catch up: advance through as many midpoints as needed for this time t
+            while (not last_midpoint_reached) and (t.tt >= midpoints[next_midpoint_idx]):
                 sat_tle_idx += 1
-                sat_tle_idx = min(sat_tle_idx, num_epochs - 1) # Avvoid out-of-range 
-                sat_tle_idx_at_times.append(sat_tle_idx)
-            else:
-                sat_tle_idx_at_times.append(sat_tle_idx)
+                sat_tle_idx = min(sat_tle_idx, num_epochs - 1)  # clamp
+
+                if next_midpoint_idx < (len(midpoints) - 1):
+                    next_midpoint_idx += 1
+                else:
+                    last_midpoint_reached = True  # we've passed the final midpoint
+
+            sat_tle_idx_at_times.append(sat_tle_idx)
 
         # Verify length
         if not len(sat_tle_idx_at_times) == len(times):

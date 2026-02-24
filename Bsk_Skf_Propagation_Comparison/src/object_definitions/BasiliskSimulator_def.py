@@ -775,7 +775,7 @@ class BasiliskSimulator:
 
             # Exponential atmosphere parameters
             atm.planetRadius = EARTH_RADIUS
-            atm.scaleHeight = 7200.0       # [m] typical scale height (7200 before tuning)
+            atm.scaleHeight = 15180.0      # [m] typical scale height (7200 before tuning)
             atm.baseDensity = 1.225         # [kg/m^3] density at 0 m
             atm.envMinReach = 0.0           # [m]
             atm.envMaxReach = 1000e3        # [m] cap model above 1000 km
@@ -1126,8 +1126,8 @@ class BasiliskSimulator:
         satellites = self.cfg.satellites
         for i in range(n_data_objects):
             # Temp: only plot atm density against altitude for the first satellite
-            # if i > 0:
-            #     break
+            if i > 0:
+                break
 
             # Set colors
             alt_color = base_colors[i]
