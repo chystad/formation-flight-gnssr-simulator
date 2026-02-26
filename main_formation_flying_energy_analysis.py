@@ -5,3 +5,6 @@ import sys
 THIS_DIR = Path(__file__).resolve().parent
 PC_SRC = THIS_DIR / "Formation_Flying_Energy_Analysis" / "src"
 sys.path.insert(0, str(PC_SRC))
+
+from Formation_Flying_Energy_Analysis.src.main import simulate_gnssr_mission
+simulate_gnssr_mission()

@@ -1,0 +1,90 @@
+# Overall simulation settings
+SIMULATION:
+  startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
+  simulationDuration: 12 # hours 
+  deltaT: 5 # Solver time step [seconds]
+  integrator: "RKF78" # [RK4(Default), RKF45, RKF78]
+  num_satellites: 1
+  sat_init_source: "oe" # [oe, vec, (tle)]
+
+# Satellite orbit 
+SATELLITES:
+  leader:
+    m_s: 6.0      # [kg]  Satellite mass
+    C_D: 2.2      # [-]   Drag coefficient
+    A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
+    C_R: 1.21     # [-]   Radiation pressure coefficient
+    A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
+    init_OEs:
+      a: 6798.        # [km]   Semi-major axis
+      e: 0.004161     # [-]   Eccentricity
+      i: 97.3166      # [deg] Inclination
+      Omega: 6.7052   # [deg] RAAN
+      omega: 83.3535  # [deg] Argument of periapsis
+      f: 276.82       # [deg] Anomaly
+    init_state_vec:
+      [6800000, 0, 0, # [m]   [x, y, z    (ECI)
+      10000, 0, 0]    # [m/s] vx, vy, vz] (ECI)
+  follower-1:
+    m_s: 6.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+    init_OEs:
+      a: 7000000.
+      e: 0.001
+      i: 33.3
+      Omega: 48.2
+      omega: 347.8
+      f: 85.3
+    init_state_vec:
+      [6800000, 0, 0,
+      10000, 0, 0]
+  follower-2:
+    m_s: 6.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+    init_OEs:
+      a: 7000000.
+      e: 0.001
+      i: 33.3
+      Omega: 48.2
+      omega: 347.8
+      f: 85.3
+    init_state_vec:
+      [6800000, 0, 0,
+      10000, 0, 0]
+
+# Reaction wheel parameters (same for all satellites)
+RW_PARAMETERS:
+  Omega: 0.0 # [RPM] initial wheel speed
+  maxMomentum: 100.0 # [Nms] Maximum momentum storage capacity
+  useFriction: false
+
+# Thruster parameters (same for all satellites)
+THRUSTER_PARAMETERS:
+  temp: false
+
+# Magnetorquer parameters (same for all satellites)
+MTQ_PARAMETERS:
+  temp: false
+
+# Disturbance torques effecting attitude (tbc)
+DISTURBANCE_TORQUE:
+  temp: false
+
+# Disturbance forces affecting translation
+DISTURBANCE_FORCE:
+  sphericalHarmonicsDegree:   4 # int >= 2
+  useSphericalHarmonics:      true
+
+  useMsisDrag:                true # First priority
+  useExponentialDensityDrag:  false # Second priority
+
+  useSRP:                     true
+
+  useSun3rdBody:              true 
+  useMoon3rdBody:             true
