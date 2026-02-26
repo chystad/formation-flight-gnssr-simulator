@@ -10,6 +10,7 @@ from dataclasses_json import dataclass_json
 
 # Global definition of data save folder path
 OUTPUT_DATA_SAVE_DIR = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
+SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
 
 
 @dataclass_json
@@ -27,6 +28,15 @@ class RelObjData:
     time: NDArray[np.float64] # (1,n)
     rel_pos: NDArray[np.float64] # (3,n)
     rel_vel: NDArray[np.float64] # (3,n)
+
+@dataclass_json
+@dataclass
+class SpaceWeatherDay:
+    """One UTC day of space-weather data from Kp_ap_Ap_SN_F107_since_2010.txt."""
+    ap: list[int]        # 8x 3-hour ap values: [00-03, 03-06, ..., 21-24]
+    Ap: int              # daily Ap
+    f107obs: float       # adjusted F10.7
+    f107adj: float       # observed F10.7
 
 
 

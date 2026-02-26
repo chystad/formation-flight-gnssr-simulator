@@ -1,8 +1,8 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 12 # hours 
-  deltaT: 5 # Solver time step [seconds]
+  simulationDuration: 9 # [hours] 
+  deltaT: 5 # [sec] Solver max time step
   integrator: "RKF78" # [RK4(Default), RKF45, RKF78]
   num_satellites: 1
   sat_init_source: "oe" # [oe, vec, (tle)]
@@ -16,7 +16,7 @@ SATELLITES:
     C_R: 1.21     # [-]   Radiation pressure coefficient
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
     init_OEs:
-      a: 6798.        # [km]   Semi-major axis
+      a: 6798.        # [km]  Semi-major axis
       e: 0.004161     # [-]   Eccentricity
       i: 97.3166      # [deg] Inclination
       Omega: 6.7052   # [deg] RAAN

@@ -9,7 +9,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
-from object_definitions.TLE_def import TLE
+# from object_definitions.TLE_def import TLE
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
 
