@@ -13,7 +13,7 @@ from dataclasses_json import dataclass_json
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
 
-from Basilisk.utilities import (orbitalMotion, macros)
+from Basilisk.utilities import (orbitalMotion, macros, unitTestSupport)
 
 
 
@@ -235,20 +235,40 @@ class Config:
             elif sat_init_source == "vec":
                 if isinstance(init_state_vec, list):
                     if len(init_state_vec) != 6:
-                        raise ValueError(f"Initial state vector for satellite '{sat_name}' does not contain 6 elements")
+                        raise ValueError(f"Initial state vector for satellite '{sat_name}' contains {len(init_state_vec)} elements (expected 6)")
                     
                     for i, elem in enumerate(init_state_vec):
                         if not (isinstance(elem, int) or isinstance(elem, float)):
                             raise ValueError(f"'init_state_vec' for satellite {sat_name} does not contain elements of the correct type. "
-                                             f"Element nr. {i} was of type {type(elem)}, expected int or float")
+                                             f"Element nr. {i} was of type {type(elem)} (expected int or float)")
 
                     np_state_arr = np.array(init_state_vec, dtype=np.float64)
                     sat_init_pos = np_state_arr[:3] # ECI Position
                     sat_init_vel = np_state_arr[3:] # ECI Velocity
 
+                else: 
+                    raise ValueError(f"'init_state_vec' parameter for satellite '{sat_name}' is not of type list")
+
             else:
                 raise ValueError(f"Unrecognized satellite initial condition source '{sat_init_source}'")
+
+            
+            # Check that I_B from config is correct, and transform it into the type expected by Basilisk
+            I_B = sat_param['I_B']
+            if isinstance(I_B, list):
+                if len(I_B) != 9:
+                    raise ValueError(f"Inertia matrix list for satellite '{sat_name}' contains {len(I_B)} elements (expected 9)")
+
+                for i, elem in enumerate(I_B):
+                    if not (isinstance(elem, int) or isinstance(elem, float)):
+                        raise ValueError(f"'I_B' for satellite {sat_name} does not contain elements of the correct type. "
+                                         f"Element nr. {i} was of type {type(elem)} (expected int or float)")
                     
+                sat_I_B = unitTestSupport.np2EigenMatrix3d(I_B)
+
+            else:
+                raise ValueError(f"'I_B' parameter for satellite '{sat_name}' is of type {type(I_B)} (expected list)")
+            
             # Create Satellite instance form current satellite name and parameters
             satellite = Satellite(
                 sat_name,
@@ -257,6 +277,7 @@ class Config:
                 A_D = sat_param['A_D'],
                 C_R = sat_param['C_R'],
                 A_srp = sat_param['A_srp'],
+                I_B = sat_I_B,
                 init_OEs = sat_init_OEs,
                 init_pos = sat_init_pos,
                 init_vel = sat_init_vel

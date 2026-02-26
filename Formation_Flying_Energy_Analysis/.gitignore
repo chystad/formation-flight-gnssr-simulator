@@ -1,3 +1,4 @@
 output_data/
 
+src/__pycache__
 src/object_definitions/__pycache__/

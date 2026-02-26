@@ -10,11 +10,14 @@ SIMULATION:
 # Satellite orbit 
 SATELLITES:
   leader:
-    m_s: 6.0      # [kg]  Satellite mass
+    m_s: 8.0      # [kg]  Satellite mass
     C_D: 2.2      # [-]   Drag coefficient
     A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
     C_R: 1.21     # [-]   Radiation pressure coefficient
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
+    I_B: [0.06666667, 0.,         0.,        
+          0.,         0.08666667, 0.,
+          0.,         0.,         0.03333333] # [kg m^2] Inertia of hub about point Bc in B frame components
     init_OEs:
       a: 6798.        # [km]  Semi-major axis
       e: 0.004161     # [-]   Eccentricity
@@ -26,11 +29,14 @@ SATELLITES:
       [6800000, 0, 0, # [m]   [x, y, z    (ECI)
       10000, 0, 0]    # [m/s] vx, vy, vz] (ECI)
   follower-1:
-    m_s: 6.0
+    m_s: 8.0
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
+    I_B: [0.06666667, 0.,         0.,        
+          0.,         0.08666667, 0.,
+          0.,         0.,         0.03333333]
     init_OEs:
       a: 7000000.
       e: 0.001
@@ -42,11 +48,14 @@ SATELLITES:
       [6800000, 0, 0,
       10000, 0, 0]
   follower-2:
-    m_s: 6.0
+    m_s: 8.0
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
+    I_B: [0.06666667, 0.,         0.,        
+          0.,         0.08666667, 0.,
+          0.,         0.,         0.03333333]
     init_OEs:
       a: 7000000.
       e: 0.001

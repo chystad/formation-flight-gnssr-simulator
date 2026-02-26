@@ -63,7 +63,7 @@ class BasiliskSimulator:
         self.cfg = cfg
 
         # Set Simulation time
-        self.spiceTime = self.to_spice_utc(self.cfg.startTime)   # Only used to initialize SPICE interface
+        self.spiceTime = self._to_spice_utc(self.cfg.startTime)   # Only used to initialize SPICE interface
         self.epochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime)   # Used for time-dependent models (SPICE interface (eclipse model by extension), MSIS)
         
         # Helper simulation time datetime objects used by other methods
@@ -158,7 +158,9 @@ class BasiliskSimulator:
             # Initialize spacecraft object
             scObj = spacecraft.Spacecraft()
             scObj.ModelTag = sat.name
-            scObj.hub.mHub = sat.m_s # getattr(sat, "m_s", 6.0)
+            scObj.hub.mHub = sat.m_s
+            scObj.hub.r_BcB_B = [[0.0], [0.0], [0.0]]  # m - position vector of body-fixed point B relative to CM
+            scObj.hub.IHubPntBc_B = sat.I_B # [kg m^2] Inertia of hub about point Bc in B frame components
 
             # Add spacecraft object to the simulation process
             self.scSim.AddModelToTask(self.simTaskName, scObj)
@@ -310,7 +312,7 @@ class BasiliskSimulator:
         # print(np.size(sat_0_dens_data))
 
         # self.DEBUG_plot_msis_atm_density()
-        self.DEBUG_plot_msis_atm_density_against_altitude()
+        self._DEBUG_plot_msis_atm_density_against_altitude()
         ############################################
 
 
@@ -691,7 +693,7 @@ class BasiliskSimulator:
 
 
     @staticmethod
-    def spaced_satellites_on_same_orbital_plane(satellite_idx: int, 
+    def _spaced_satellites_on_same_orbital_plane(satellite_idx: int, 
                                                 separation_ang: float, 
                                                 mu: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """
@@ -729,7 +731,7 @@ class BasiliskSimulator:
     
 
     @staticmethod
-    def to_spice_utc(s: str) -> str:
+    def _to_spice_utc(s: str) -> str:
         # s like "02.04.2025 12:00:00" (DD.MM.YYYY HH:MM:SS) in local time (Europe/Oslo)
         dt_local = datetime.strptime(s, "%d.%m.%Y %H:%M:%S")
         # If the string is already UTC, replace with timezone.utc directly.
@@ -738,7 +740,7 @@ class BasiliskSimulator:
         return dt_utc.strftime("%Y %b %d %H:%M:%S UTC")
     
 
-    def DEBUG_plot_msis_atm_density_against_altitude(self) -> None:
+    def _DEBUG_plot_msis_atm_density_against_altitude(self) -> None:
         """
         Print
         """
