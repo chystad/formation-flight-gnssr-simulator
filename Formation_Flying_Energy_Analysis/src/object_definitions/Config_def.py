@@ -22,7 +22,8 @@ class Config:
         """
         =========================================================================================================
         [WORK IN PROGRESS]
-        Initialize Config instance with attributes from the config file
+        Initialize Config instance with attributes from the config file. 
+        Perform checks to ensure all parameters are received as expected. 
 
         INPUTS:
            config_file_path                    
@@ -50,25 +51,40 @@ class Config:
         ##################################################
         # Fetch global simulation parameters config file #
         ##################################################
-        startTime_str =             str(    d_cfg['SIMULATION']['startTime'])
-        simulationDuration =        float(  d_cfg['SIMULATION']['simulationDuration'])  
-        deltaT =                    float(  d_cfg['SIMULATION']['deltaT'])  
-        integrator =                str(    d_cfg['SIMULATION']['integrator'])
-        num_satellites =            int(    d_cfg['SIMULATION']['num_satellites'])
-        sat_init_source =           str(    d_cfg['SIMULATION']['sat_init_source'])
+        startTime_str =         str(    d_cfg['SIMULATION']['startTime'])
+        simulationDuration =    float(  d_cfg['SIMULATION']['simulationDuration'])  
+        deltaT =                float(  d_cfg['SIMULATION']['deltaT'])  
+        integrator =            str(    d_cfg['SIMULATION']['integrator'])
+        num_satellites =        int(    d_cfg['SIMULATION']['num_satellites'])
+        sat_init_source =       str(    d_cfg['SIMULATION']['sat_init_source'])
         all_sat_params =                    d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
 
         # Reaction wheel parameters (same for all satellites)
-        Omega =                      float(   d_cfg['RW_PARAMETERS']['Omega'])
+        RW_model =              str(    d_cfg['RW_PARAMETERS']['RW_model'])
+        spinUVecs =                     d_cfg['RW_PARAMETERS']['spinUVecs'] # list[list[float]]
+        init_rpm =              float(  d_cfg['RW_PARAMETERS']['init_rpm'])
+        max_rpm =               float(  d_cfg['RW_PARAMETERS']['max_rpm'])
+        maxMomentum =           float(  d_cfg['RW_PARAMETERS']['maxMomentum'])
+        maxTorque =             float(  d_cfg['RW_PARAMETERS']['maxTorque'])
+        minTorque =             float(  d_cfg['RW_PARAMETERS']['minTorque'])
+        # I_RW =                  float(  d_cfg['RW_PARAMETERS']['I_RW'])
+        useMinTorque =          bool(   d_cfg['RW_PARAMETERS']['useMinTorque'])
+        useFriction =           bool(   d_cfg['RW_PARAMETERS']['useFriction'])
+        fCoulomb =              float(  d_cfg['RW_PARAMETERS']['fCoulomb'])
+        fStatic =               float(  d_cfg['RW_PARAMETERS']['fStatic'])
+        betaStatic =            float(  d_cfg['RW_PARAMETERS']['betaStatic'])
+        cViscous =              float(  d_cfg['RW_PARAMETERS']['cViscous'])
+        
+        
 
         # Thruster parameters (same for all satellites)
-        temp =                      bool(   d_cfg['THRUSTER_PARAMETERS']['temp'])
+        temp =                  bool(   d_cfg['THRUSTER_PARAMETERS']['temp'])
 
         # Magnetorquer parameters (same for all satellites)
-        temp =                      bool(   d_cfg['MTQ_PARAMETERS']['temp'])
+        temp =                  bool(   d_cfg['MTQ_PARAMETERS']['temp'])
         
         # Disturbance torque settings
-        temp =                      bool(   d_cfg['DISTURBANCE_TORQUE']['temp'])
+        temp =                  bool(   d_cfg['DISTURBANCE_TORQUE']['temp'])
         
         # Disturbance force settings
         sphericalHarmonicsDegree =      int(    d_cfg['DISTURBANCE_FORCE']['sphericalHarmonicsDegree'])
@@ -79,6 +95,41 @@ class Config:
         useSun3rdBody =                 bool(   d_cfg['DISTURBANCE_FORCE']['useSun3rdBody'])
         useMoon3rdBody =                bool(   d_cfg['DISTURBANCE_FORCE']['useMoon3rdBody'])
 
+        
+        ################################################################
+        # Perform checks to ensure parameters are received as expected #
+        ################################################################
+        # --- Verify RW_model input ---
+        if isinstance(RW_model, str):
+            if not ((RW_model == "BalancedWheels") or (RW_model == "JitterSimple") or (RW_model == "JitterFullyCoupled")):
+                raise ValueError(f"Unexpected value given for 'RW_model'. "
+                                 f"Got '{RW_model}', expected ['BalancedWheels', 'JitterSimple', 'JitterFullyCoupled'])")
+        else: 
+            raise ValueError(f"Unexpected type given for 'RW_model'. "
+                             f"Got '{type(RW_model)}', expected 'str'")
+        
+        # --- Verify spinUVecs input ---
+        if isinstance(spinUVecs, list):
+            num_RWs = len(spinUVecs)
+            if num_RWs == 0:
+                raise ValueError(f"No RW unit vectors defined in 'spinUVecs'")
+            
+            for i, spin_uvec in enumerate(spinUVecs):
+                if len(spin_uvec) != 3:
+                    raise ValueError(f"RW spin unit vector nr. {i} has {len(spin_uvec)} elements, expected 3")
+                v = np.array(spin_uvec)
+                norm = np.linalg.norm(v)
+                if not np.isclose(norm, 1.0):
+                    raise ValueError(f"RW spin vector nr. {i} is not of unit length. (given length: {norm})")
+        else:
+            raise ValueError(f"Unexpected type given for 'spinUVecs'. "
+                             f"Got '{type(spinUVecs)}', expected 'list[list[float]]'")
+
+        # --- Verify RW friction parameters ---
+
+        #TODO: Other received parameters
+        
+        
         # Create Satellite intstances
         satellites = self.generate_satellite_instances_from_config(
             all_sat_params, 
@@ -102,7 +153,20 @@ class Config:
         self.satellites: list[Satellite] = satellites
 
         # TODO: RW parameters
-        self.Omega: float = Omega # [RPM]
+        self.RW_model: str = RW_model
+        self.spinUVecs: list[list[float]] = spinUVecs
+        self.init_rpm: float = init_rpm 
+        self.max_rpm: float = max_rpm
+        self.maxMomentum: float = maxMomentum 
+        self.maxTorque: float = maxTorque
+        self.minTorque: float = minTorque
+        # self.I_RW: float = I_RW
+        self.useMinTorque: bool = useMinTorque
+        self.useFriction: bool = useFriction
+        self.fCoulomb: float = fCoulomb
+        self.fStatic: float = fStatic
+        self.betaStatic: float = betaStatic
+        self.cViscous: float = cViscous
 
         # TODO: Thruster parameters
         self.temp: bool = temp
@@ -263,11 +327,43 @@ class Config:
                     if not (isinstance(elem, int) or isinstance(elem, float)):
                         raise ValueError(f"'I_B' for satellite {sat_name} does not contain elements of the correct type. "
                                          f"Element nr. {i} was of type {type(elem)} (expected int or float)")
-                    
-                sat_I_B = unitTestSupport.np2EigenMatrix3d(I_B)
-
             else:
                 raise ValueError(f"'I_B' parameter for satellite '{sat_name}' is of type {type(I_B)} (expected list)")
+            
+
+            # Check that init_att from config is correct
+            init_att = sat_param['init_att']
+            if isinstance(init_att, list):
+                if not len(init_att) == 3:
+                    raise ValueError(f"'init_att' for satellite {sat_name} contained {len(init_att)} elements (expected 3)")
+                init_att_arr = np.array(init_att)
+                init_att_norm = np.linalg.norm(init_att_arr)
+                if init_att_norm > 1:
+                    logging.warning(f"[WARNING] The eucledian norm of 'init_att' for satellite {sat_name} is over 1 ({init_att_norm}). "
+                                    f"The initial attitude is outside the principal MRP set. Consider selecting smaller components")
+                for i, elem in enumerate(init_att):
+                    if not len(elem) == 1:
+                        raise ValueError(f"MRP parameter nr. {i} in 'init_att' for satellite {sat_name} contained {len(elem)} elements (expected 1)")
+                    if not (isinstance(elem[0], int) or isinstance(elem[0], float)):
+                        raise ValueError(f"'init_att' for satellite {sat_name} does not contain elements of the correct type. "
+                                         f"Element nr. {i} was of type {type(elem)} (expected int or float)")
+            else:
+                raise ValueError(f"'init_att' parameter for satellite {sat_name} is of type {type(init_att)} (expected list[list[float]])")
+            
+
+            # Check that init_angvel from config is correct
+            init_angvel = sat_param['init_angvel']
+            if isinstance(init_angvel, list):
+                if not len(init_angvel) == 3:
+                    raise ValueError(f"'init_angvel' for satellite {sat_name} contained {len(init_angvel)} elements (expected 3)")
+                for i, elem in enumerate(init_angvel):
+                    if not len(elem) == 1:
+                        raise ValueError(f"MRP parameter nr. {i} in 'init_angvel' for satellite {sat_name} contained {len(elem)} elements (expected 1)")
+                    if not (isinstance(elem[0], int) or isinstance(elem[0], float)):
+                        raise ValueError(f"'init_angvel' for satellite {sat_name} does not contain elements of the correct type. "
+                                         f"Element nr. {i} was of type {type(elem)} (expected int or float)")
+            else:
+                raise ValueError(f"'init_angvel' parameter for satellite {sat_name} is of type {type(init_angvel)} (expected list[list[float]])")
             
             # Create Satellite instance form current satellite name and parameters
             satellite = Satellite(
@@ -277,10 +373,12 @@ class Config:
                 A_D = sat_param['A_D'],
                 C_R = sat_param['C_R'],
                 A_srp = sat_param['A_srp'],
-                I_B = sat_I_B,
+                I_B = I_B,
                 init_OEs = sat_init_OEs,
                 init_pos = sat_init_pos,
-                init_vel = sat_init_vel
+                init_vel = sat_init_vel,
+                init_att = init_att,
+                init_angvel = init_angvel
             )
 
             logging.debug(f"[CFG] Appending {sat_name} to 'satellites'")

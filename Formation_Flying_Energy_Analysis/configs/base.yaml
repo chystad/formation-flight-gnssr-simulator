@@ -1,13 +1,13 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 9 # [hours] 
-  deltaT: 5 # [sec] Solver max time step
-  integrator: "RKF78" # [RK4(Default), RKF45, RKF78]
+  simulationDuration: 1 # [hours] 
+  deltaT: 0.1 # [sec] Solver max time step
+  integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 1
   sat_init_source: "oe" # [oe, vec, (tle)]
 
-# Satellite orbit 
+# Satellite parameters
 SATELLITES:
   leader:
     m_s: 8.0      # [kg]  Satellite mass
@@ -17,7 +17,7 @@ SATELLITES:
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
     I_B: [0.06666667, 0.,         0.,        
           0.,         0.08666667, 0.,
-          0.,         0.,         0.03333333] # [kg m^2] Inertia of hub about point Bc in B frame components
+          0.,         0.,         0.03333333] # [kgm^2] Inertia of hub about point Bc in B frame components
     init_OEs:
       a: 6798.        # [km]  Semi-major axis
       e: 0.004161     # [-]   Eccentricity
@@ -28,6 +28,8 @@ SATELLITES:
     init_state_vec:
       [6800000, 0, 0, # [m]   [x, y, z    (ECI)
       10000, 0, 0]    # [m/s] vx, vy, vz] (ECI)
+    init_att: [[0.3], [0.2], [-0.2]]    # Orientation of Body relative to Inertial expressed using MRP
+    init_angvel: [[0.1], [0.15], [0.]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
     m_s: 8.0
     C_D: 2.2
@@ -38,15 +40,17 @@ SATELLITES:
           0.,         0.08666667, 0.,
           0.,         0.,         0.03333333]
     init_OEs:
-      a: 7000000.
-      e: 0.001
-      i: 33.3
-      Omega: 48.2
-      omega: 347.8
-      f: 85.3
+      a: 6798.
+      e: 0.004161
+      i: 97.3166 
+      Omega: 6.7052
+      omega: 83.3535
+      f: 286.82
     init_state_vec:
       [6800000, 0, 0,
       10000, 0, 0]
+    init_att: [[0.], [0.], [0.]]
+    init_angvel: [[0.], [0.], [0.]] 
   follower-2:
     m_s: 8.0
     C_D: 2.2
@@ -57,21 +61,37 @@ SATELLITES:
           0.,         0.08666667, 0.,
           0.,         0.,         0.03333333]
     init_OEs:
-      a: 7000000.
-      e: 0.001
-      i: 33.3
-      Omega: 48.2
-      omega: 347.8
-      f: 85.3
+      a: 6798.
+      e: 0.004161
+      i: 97.3166 
+      Omega: 6.7052
+      omega: 83.3535
+      f: 286.82
     init_state_vec:
       [6800000, 0, 0,
       10000, 0, 0]
+    init_att: [[0.], [0.], [0.]]
+    init_angvel: [[0.], [0.], [0.]] 
 
 # Reaction wheel parameters (same for all satellites)
+# From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
 RW_PARAMETERS:
-  Omega: 0.0 # [RPM] initial wheel speed
-  maxMomentum: 100.0 # [Nms] Maximum momentum storage capacity
+  RW_model: "BalancedWheels"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
+  spinUVecs: [[1., 0., 0.],   # Spin axis unit vector in Body frame [x_B, y_B, z_B]
+              [0., 1., 0.],     # (Then number of vectors also define the number of RWs)
+              [0., 0., 1.]]
+  init_rpm: 0.0               # [RPM] initial wheel speed
+  max_rpm: 6000.0             # [RPM] max wheel angular velocity
+  maxMomentum: 0.015            # [Nms] Maximum momentum storage capacity
+  maxTorque: 0.004            # [Nm] Maximum RW motor torque
+  minTorque: 0.00001          # [Nm] Minimum RW motor torque
+  # I_RW: 1.                  # [kgm^2] RW inertia about spin axis (calculated from maxMomentum, max_rpm)
+  useMinTorque: false
   useFriction: false
+  fCoulomb: 0.00005           # [-] Coulomb friction torque model coeff
+  fStatic: 1.                 # [-] Static friction torque magnitude
+  betaStatic: 1.              # [-] Stribeck friction coefficient, positive turns Stribeck friction on, negative turns this friction off
+  cViscous: 1.                # [-] Viscous friction coeff
 
 # Thruster parameters (same for all satellites)
 THRUSTER_PARAMETERS:

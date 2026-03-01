@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
 # Global definition of data save folder path
-OUTPUT_DATA_SAVE_DIR = Path('Bsk_Skf_Propagation_Comparison/output_data/sim_data')
+OUTPUT_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/sim_data')
 SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
 
 
