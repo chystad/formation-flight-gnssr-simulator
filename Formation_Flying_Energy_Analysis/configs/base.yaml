@@ -1,10 +1,10 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 1 # [hours] 
+  simulationDuration: 0.1 # [hours] 
   deltaT: 0.1 # [sec] Solver max time step
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 1
+  num_satellites: 2
   sat_init_source: "oe" # [oe, vec, (tle)]
 
 # Satellite parameters
@@ -49,8 +49,8 @@ SATELLITES:
     init_state_vec:
       [6800000, 0, 0,
       10000, 0, 0]
-    init_att: [[0.], [0.], [0.]]
-    init_angvel: [[0.], [0.], [0.]] 
+    init_att: [[0.3], [0.2], [-0.2]]
+    init_angvel: [[0.1], [0.15], [0.]] 
   follower-2:
     m_s: 8.0
     C_D: 2.2
