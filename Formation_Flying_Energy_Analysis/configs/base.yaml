@@ -49,8 +49,8 @@ SATELLITES:
     init_state_vec:
       [6800000, 0, 0,
       10000, 0, 0]
-    init_att: [[0.3], [0.2], [-0.2]]
-    init_angvel: [[0.1], [0.15], [0.]] 
+    init_att: [[0.], [0.], [0.]]
+    init_angvel: [[0.1], [0.], [0.]] 
   follower-2:
     m_s: 8.0
     C_D: 2.2
@@ -66,12 +66,12 @@ SATELLITES:
       i: 97.3166 
       Omega: 6.7052
       omega: 83.3535
-      f: 286.82
+      f: 296.82
     init_state_vec:
       [6800000, 0, 0,
       10000, 0, 0]
     init_att: [[0.], [0.], [0.]]
-    init_angvel: [[0.], [0.], [0.]] 
+    init_angvel: [[0.1], [0.], [0.]] 
 
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)

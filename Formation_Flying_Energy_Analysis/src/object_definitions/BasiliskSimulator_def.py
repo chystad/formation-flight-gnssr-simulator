@@ -9,12 +9,10 @@ from datetime import datetime, timezone, timedelta
 
 from Basilisk import __path__
 from Basilisk.architecture import messaging
-from Basilisk.fswAlgorithms import (mrpFeedback, attTrackingError,
-                                    inertial3D, rwMotorTorque, rwMotorVoltage)
 from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
                                 exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, 
-                                svIntegrators, reactionWheelStateEffector, motorVoltageInterface,
-                                RWConfigPayload, simpleNav)
+                                svIntegrators, reactionWheelStateEffector,
+                                RWConfigPayload)
 from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simIncludeGravBody, 
                                 unitTestSupport, vizSupport, fswSetupRW, simIncludeRW)
 
@@ -22,6 +20,7 @@ from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
 from object_definitions.MsisInputUpdater_def import (MsisInputUpdater, MSIS_SW_KEYS)
+from Formation_Flying_Energy_Analysis.src.object_definitions.fswStack_def import fswStack
 
 
 # from plotting.plot import PLT_WIDTH, PLT_HEIGHT
@@ -31,9 +30,6 @@ PLT_WIDTH = 16.0
 EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
 GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
-MRP_K = 0.01 # MRP pointing controller: Gain on MRP attitude error 
-MRP_P = 0.02 # MRP pointing controller: Gain on Rate error
-MRP_KI = -1  # MRP pointing controller: Integral gain (-1 -> disable)
 
 
 class BasiliskSimulator:
@@ -57,6 +53,35 @@ class BasiliskSimulator:
         sim_data            (Optional[SimData]) Object containing the simulaton output data 
         _simStartDt         (datetime) Simulation start time helper
         _simEndDt           (datetime) Simulation end time helper
+
+
+    Scheduler execution priority
+    <SimBaseClass>
+    |---<Process>
+        |---<Task>
+            |---<Model>
+    scSim
+    |
+    |---simProcess
+        |
+        |---simTask Pri: 0
+            |
+            |---scObj (All of them)
+            |
+            |---
+            |
+            |---
+            |
+            |---
+            |
+            |---
+        |
+        |---fswTask (Task) Pri: 5
+        |
+        |---msisInputUpdater (Task) Pri: 10
+
+
+    
     =========================================================================================================
     """
     def __init__(self, cfg: Config) -> None:
@@ -97,6 +122,12 @@ class BasiliskSimulator:
         self.msisSwWriters: list[messaging.SwDataMsg] = []
         self.msisSwMsgs: list[messaging.SwDataMsg] = []  # optional: store the published m
 
+        # Create a stable list of flight software stacks
+        self.fswStacks: list[fswStack] = []
+        # self.rwEffectors: list = []
+        self.rwFactories: list[simIncludeRW.rwFactory] = []
+        self.fswRwParamMsgs: list[messaging.RWArrayConfigMsg] = []
+
         # Dictionary to keep track of RW clusters for each satellite
         self.rwClusters: dict[str, list[RWConfigPayload.RWConfigPayload]] = {}
 
@@ -127,7 +158,13 @@ class BasiliskSimulator:
 
         # create the simulation task with a simulation time step, and give it 0 priority (will be executed last)
         self.dynProcess.addTask(self.scSim.CreateNewTask(self.simTaskName, simulationTimeStep), 0)
-        
+
+
+        #########################################
+        # Create dedicated Flight Software task #
+        #########################################
+        self.fswTaskName = "fswTask"
+        self.dynProcess.addTask(self.scSim.CreateNewTask(self.fswTaskName, simulationTimeStep), 5)  
 
         ######################################################################
         # Initialize planets according to config and configure their gravity #
@@ -170,6 +207,7 @@ class BasiliskSimulator:
         # Define all spacecraft objects, attach all force models, add it and recorders to the simulator #
         #################################################################################################
         for i, sat in enumerate(satellites):
+
             # Initialize spacecraft object
             scObj = spacecraft.Spacecraft()
             scObj.ModelTag = sat.name
@@ -220,113 +258,40 @@ class BasiliskSimulator:
             scObj, rwFactory, rwEffector = self.RW_effector(sat, scObj, i)
 
 
+            # ---- Reaction Wheel flight software ----
+            fswRwParamMsg = rwFactory.getConfigMessage()
+            self.fswRwParamMsgs.append(fswRwParamMsg)
+            fsw = fswStack(
+                cfg = self.cfg,
+                sat = sat,
+                sat_idx = i,
+                sc_state_out_msg = scObj.scStateOutMsg,
+                rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
+                rw_config_msg = fswRwParamMsg,
+            )            
+            self.scSim.AddModelToTask(self.fswTaskName, fsw)
 
-            ############### COPIED GNC MODULE FROM 'scenarioAttitudeFeedbackRW.py'
-
-            # add the simple Navigation sensor module.  This sets the SC attitude, rate, position
-            # velocity navigation message
-            sNavObject = simpleNav.SimpleNav()
-            sNavObject.ModelTag = f"SimpleNavigation_{i}"
-            self.scSim.AddModelToTask(self.simTaskName, sNavObject)
-
-
-            # ---- Flight software ----
-            # setup inertial3D guidance module to publish reference (const reference attidude wrt. inertial frame)
-            # TODO: Create a time-dependent guidance system
-            inertial3DObj = inertial3D.inertial3D()
-            inertial3DObj.ModelTag = f"inertial3D_{i}"
-            self.scSim.AddModelToTask(self.simTaskName, inertial3DObj)
-            inertial3DObj.sigma_R0N = [0., 0., 0.]  # set the desired inertial orientation using Modified Rodrigues Parameterization (MRP)
-
-
-            # setup the attitude tracking error evaluation module
-            attError = attTrackingError.attTrackingError()
-            attError.ModelTag = f"attErrorInertial3D_{i}"
-            self.scSim.AddModelToTask(self.simTaskName, attError)
-
-
-            # setup the MRP Feedback control module
-            # TODO: Implement a custom pointing controller
-            # https://hanspeterschaub.info/bskOlderDocs/bsk_1_3_2/_downloads/a773ef7ff611aeef9230f2e501e65ac8/Basilisk-MRP_Feedback-2016-0108.pdf?utm_source=chatgpt.com
-            mrpControl = mrpFeedback.mrpFeedback()
-            mrpControl.ModelTag = f"mrpFeedback_{i}"
-            self.scSim.AddModelToTask(self.simTaskName, mrpControl)
-            mrpControl.K = MRP_K   # Proportional gain on MRP error
-            mrpControl.P = MRP_P   # Gain on Rate error
-            mrpControl.Ki = MRP_KI  # make value negative to turn off integral feedback
-            if MRP_KI > 0:
-                mrpControl.integralLimit = 2. / mrpControl.Ki * 0.1
-
-            # add module that maps the Lr control torque into the RW motor torques
-            rwMotorTorqueObj = rwMotorTorque.rwMotorTorque()
-            rwMotorTorqueObj.ModelTag = f"rwMotorTorque_{i}"
-            self.scSim.AddModelToTask(self.simTaskName, rwMotorTorqueObj)
-
-            # Make the RW control all three body axes 
-            # (independent of RW configuration, but not realizable if spinUVecs don't span R^3)
-            controlAxes_B = [1, 0, 0, 
-                             0, 1, 0, 
-                             0, 0, 1]
-            rwMotorTorqueObj.controlAxes_B = controlAxes_B
-
-            # create the FSW vehicle configuration message
-            # use the same inertia in the FSW algorithm as in the simulation
-            vehicleConfigOut = messaging.VehicleConfigMsgPayload(ISCPntB_B=sat.I_B)
-            vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
-
-            # Two options are shown to setup the FSW RW configuration message.
-            # First case: The FSW RW configuration message
-            # uses the same RW states in the FSW algorithm as in the simulation.  In the following code
-            # the fswSetupRW helper functions are used to individually add the RW states.  The benefit of this
-            # method of the second method below is that it is easy to vary the FSW parameters slightly from the
-            # simulation parameters.  In this script the second method is used, while the fist method is included
-            # to show both options.
-            fswSetupRW.clearSetup()
-            for key, rw in rwFactory.rwList.items():
-                fswSetupRW.create(unitTestSupport.EigenVector3d2np(rw.gsHat_B), rw.Js, 0.2)
-            fswRwParamMsg1 = fswSetupRW.writeConfigMessage()
-
-            # Second case: If the exact same RW configuration states are to be used by the simulation and fsw, then the
-            # following helper function is convenient to extract the fsw RW configuration message from the
-            # rwFactory setup earlier.
-            fswRwParamMsg2 = rwFactory.getConfigMessage()
-            fswRwParamMsg = fswRwParamMsg2
-
-            ########################
+            # RW effector must know its commanded torque
+            rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
 
 
             # ---- Set object integration method ----
             scObj = self.conditional_object_integrator(scObj)
 
-
-
-            # ---- Link messages ----
-            sNavObject.scStateInMsg.subscribeTo(scObj.scStateOutMsg)
-            attError.attNavInMsg.subscribeTo(sNavObject.attOutMsg)
-            attError.attRefInMsg.subscribeTo(inertial3DObj.attRefOutMsg)
-            mrpControl.guidInMsg.subscribeTo(attError.attGuidOutMsg)
-            mrpControl.vehConfigInMsg.subscribeTo(vcMsg)
-            mrpControl.rwParamsInMsg.subscribeTo(fswRwParamMsg)
-            mrpControl.rwSpeedsInMsg.subscribeTo(rwEffector.rwSpeedOutMsg)
-            rwMotorTorqueObj.rwParamsInMsg.subscribeTo(fswRwParamMsg)
-            rwMotorTorqueObj.vehControlInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
-            rwEffector.rwMotorCmdInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
-            
            
-            # ---- Define and append scRecorders and scObjects ----
-            # Create object state and force recorders
+            # ---- Define and append persistent objects and recorders ----
+            # Create recorders
             scRec = scObj.scStateOutMsg.recorder(samplingTime)
             assert atm is not None
             atmLog = atm.envOutMsgs[i].recorder(samplingTime)
-            rwMotorLog = rwMotorTorqueObj.rwMotorTorqueOutMsg.recorder(samplingTime)
-            attErrorLog = attError.attGuidOutMsg.recorder(samplingTime)
-            snTransLog = sNavObject.transOutMsg.recorder(samplingTime)
+            rwMotorLog = fsw.rwMotorTorqueOutMsg.recorder(samplingTime)
+            attErrorLog = fsw.attGuidOutMsg.recorder(samplingTime)
+            snTransLog = fsw.navTransOutMsg.recorder(samplingTime)
             mrpLog = rwEffector.rwSpeedOutMsg.recorder(samplingTime)
             rwLogs: list = []
             for j in range(len(self.cfg.spinUVecs)):
                 rwLogs.append(rwEffector.rwOutMsgs[j].recorder(samplingTime))
                 self.scSim.AddModelToTask(self.simTaskName, rwLogs[j])
-
             # srpRec = self.make_srp_recorder(srp, samplingTime)  
 
             # Add recorder to the simulation process
@@ -338,8 +303,11 @@ class BasiliskSimulator:
             self.scSim.AddModelToTask(self.simTaskName, mrpLog)
             # self.scSim.AddModelToTask(self.simTaskName, srpRec)
                         
-            # Append defined spacecraft object and scRec to scObjects and scRecorders, respectively
+            # Append object and recorders to avvoid them getting CE'ed
             self.scObjects.append(scObj)
+            self.fswStacks.append(fsw)
+            self.rwFactories.append(rwFactory)
+
             self.scRecorders.append(scRec)
             self.atmRecorders.append(atmLog)
             self.rwMotorRecorders.append(rwMotorLog)
@@ -445,7 +413,7 @@ class BasiliskSimulator:
 
 
         ############ RW and Pointing controll debug ############
-        sat_idx = 1
+        sat_idx = 0
         fileName = os.path.basename(os.path.splitext(__file__)[0])
         # num_RWs = len(self.RWs)
         num_RWs = len(self.cfg.spinUVecs)

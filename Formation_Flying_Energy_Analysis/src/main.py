@@ -21,11 +21,7 @@ if __name__ == "__main__":
 
 # TODO
 """
-* [Optional] Merge config files into one 
-* [Optional] Optimize the Skyfield simulation by editing SkyfieldSimulator.run() to call sat.at(times_segment) in a batch 
-* Make Basilisk model parameters part of the Basilisk config (was talking about exp atm scale height, for example)
-* [IMPORTANT] Get MSIS model parameters from data, and update during runtime
-
-Simulator Misk:
-* To Master: Enable the option to queue multiple simulation runs with different configurations
+* [IMPORTANT] Don't use cannonball SRP and Drag effector. This makes them attitude independent!
+* Move GNC module from 'BasiliskSimulator_def' into its own object def script and schedule it as a task.
+* Enable the option to queue multiple simulation runs with different configurations
 """
