@@ -14,7 +14,7 @@ MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
 
 
-class fswStack(sysModel.SysModel):
+class FswStack(sysModel.SysModel):
     """
     One-per-spacecraft RW flight-software "stack" wrapped in a single SysModel so it can be scheduled
     as one model inside a dedicated FSW task.
@@ -141,7 +141,7 @@ class fswStack(sysModel.SysModel):
         """
         # Order matters: nav -> guidance -> error -> control -> mapping
         
-        # [TEST] Perform a 180 deg flip maneuver after 10 minutes
+        # [TEST] Perform a 180 deg flip maneuver after 2.5 minutes
         if not self.changed_pointing_obj and (CurrentSimNanos*macros.NANO2MIN > 2.5):
             self.guid.sigma_R0N = [0.0, 0.0, 1.0]
             self.changed_pointing_obj = True
@@ -172,3 +172,8 @@ class fswStack(sysModel.SysModel):
 
     def _modules(self):
         return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
+
+
+    def _guidance(self) -> list[float]:
+
+        return [1., 0., 0.]

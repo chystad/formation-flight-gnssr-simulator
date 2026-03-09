@@ -4,7 +4,7 @@ SIMULATION:
   simulationDuration: 0.1 # [hours] 
   deltaT: 0.1 # [sec] Solver max time step
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 2
+  num_satellites: 3
   sat_init_source: "oe" # [oe, vec, (tle)]
 
 # Satellite parameters
@@ -57,9 +57,9 @@ SATELLITES:
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.06666667, 0.,         0.,        
-          0.,         0.08666667, 0.,
-          0.,         0.,         0.03333333]
+    I_B: [0.1, 0.,         0.,        
+          0.,         0.1, 0.,
+          0.,         0.,         0.1]
     init_OEs:
       a: 6798.
       e: 0.004161
@@ -76,7 +76,7 @@ SATELLITES:
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
 RW_PARAMETERS:
-  RW_model: "BalancedWheels"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
+  RW_model: "JitterFullyCoupled"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
   spinUVecs: [[1., 0., 0.],   # Spin axis unit vector in Body frame [x_B, y_B, z_B]
               [0., 1., 0.],     # (Then number of vectors also define the number of RWs)
               [0., 0., 1.]]
@@ -110,7 +110,7 @@ DISTURBANCE_FORCE:
   sphericalHarmonicsDegree:   4 # int >= 2
   useSphericalHarmonics:      true
 
-  useMsisDrag:                true # First priority
+  useMsisDrag:                true  # First priority
   useExponentialDensityDrag:  false # Second priority
 
   useSRP:                     true

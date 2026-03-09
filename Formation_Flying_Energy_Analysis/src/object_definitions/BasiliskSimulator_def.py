@@ -20,7 +20,7 @@ from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
 from object_definitions.MsisInputUpdater_def import (MsisInputUpdater, MSIS_SW_KEYS)
-from Formation_Flying_Energy_Analysis.src.object_definitions.fswStack_def import fswStack
+from Formation_Flying_Energy_Analysis.src.object_definitions.FswStack_def import FswStack
 
 
 # from plotting.plot import PLT_WIDTH, PLT_HEIGHT
@@ -123,7 +123,7 @@ class BasiliskSimulator:
         self.msisSwMsgs: list[messaging.SwDataMsg] = []  # optional: store the published m
 
         # Create a stable list of flight software stacks
-        self.fswStacks: list[fswStack] = []
+        self.fswStacks: list[FswStack] = []
         # self.rwEffectors: list = []
         self.rwFactories: list[simIncludeRW.rwFactory] = []
         self.fswRwParamMsgs: list[messaging.RWArrayConfigMsg] = []
@@ -261,7 +261,7 @@ class BasiliskSimulator:
             # ---- Reaction Wheel flight software ----
             fswRwParamMsg = rwFactory.getConfigMessage()
             self.fswRwParamMsgs.append(fswRwParamMsg)
-            fsw = fswStack(
+            fsw = FswStack(
                 cfg = self.cfg,
                 sat = sat,
                 sat_idx = i,
