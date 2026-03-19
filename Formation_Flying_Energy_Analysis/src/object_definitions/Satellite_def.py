@@ -25,7 +25,7 @@ class Satellite:
             init_vel: Optional[NDArray[np.float64]],  # 3 element vel vec
             init_att: list[list[float]], # Orientation of Body relative to Inertial expressed using MRP
             init_angvel: list[list[float]] # Angular velocity og Body relative to Inertial expressed in Body
-        ):
+        ) -> None:
         """
         ==========================================================================================================
         NOTE: Satellite attribute types will always be inherited from inputs. Necessay parsing and type 

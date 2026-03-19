@@ -12,7 +12,7 @@ from Basilisk.architecture import messaging
 from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
                                 exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, 
                                 svIntegrators, reactionWheelStateEffector,
-                                RWConfigPayload)
+                                RWConfigPayload, groundLocation)
 from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simIncludeGravBody, 
                                 unitTestSupport, vizSupport, fswSetupRW, simIncludeRW)
 
@@ -131,6 +131,9 @@ class BasiliskSimulator:
         # Dictionary to keep track of RW clusters for each satellite
         self.rwClusters: dict[str, list[RWConfigPayload.RWConfigPayload]] = {}
 
+        # Stable list containing all ground stations
+        self.groundStations: list[groundLocation.GroundLocation] = []
+
         # path to basilisk. Used to fetch predesigned models
         bskPath = __path__[0]
         fileName = os.path.basename(os.path.splitext(__file__)[0])
@@ -166,6 +169,7 @@ class BasiliskSimulator:
         self.fswTaskName = "fswTask"
         self.dynProcess.addTask(self.scSim.CreateNewTask(self.fswTaskName, simulationTimeStep), 5)  
 
+
         ######################################################################
         # Initialize planets according to config and configure their gravity #
         ######################################################################
@@ -183,6 +187,30 @@ class BasiliskSimulator:
         ##############################################
         # Initialize the exponential density atmosphere model iff b_set.useExponentialDensityDrag == True
         atm = self.conditional_atmosphere_init()
+
+
+
+
+
+
+        # ======== TESTING GROUND STATIONS ======== #
+        for i, gs in enumerate(cfg.ground_stations):
+            groundStation = groundLocation.GroundLocation()
+            groundStation.ModelTag = gs.gs_tag
+            groundStation.planetRadius = EARTH_RADIUS
+            groundStation.specifyLocation(np.radians(gs.lat), np.radians(gs.long), gs.alt)
+            groundStation.planetInMsg.subscribeTo(spiceObj.planetStateOutMsgs[0])
+            groundStation.minimumElevation = np.radians(gs.min_elev)
+            groundStation.maximumRange = gs.max_range
+
+            # Append to stable list
+            self.groundStations.append(groundStation)
+
+            # Add to task
+            self.scSim.AddModelToTask(self.simTaskName, groundStation)
+
+        # ============================================ #
+
 
 
         #################################################################
@@ -258,16 +286,23 @@ class BasiliskSimulator:
             scObj, rwFactory, rwEffector = self.RW_effector(sat, scObj, i)
 
 
-            # ---- Reaction Wheel flight software ----
+             # ---- Attach spacecraft to ground station(s) and prepair access msgs for fsw ---- 
+            gs_access_msgs: list[messaging.AccessMsg] = [] # will contain the access msg for this spacecraft against all ground stations
+            for j, gs in enumerate(self.groundStations):
+                gs.addSpacecraftToModel(scObj.scStateOutMsg)
+                gs_access_msgs.append(gs.accessOutMsgs[-1]) # -1 idx refers to the latest added sc (current iteration sat)
+            
+
+            # ---- Flight software ----
             fswRwParamMsg = rwFactory.getConfigMessage()
             self.fswRwParamMsgs.append(fswRwParamMsg)
             fsw = FswStack(
-                cfg = self.cfg,
                 sat = sat,
                 sat_idx = i,
                 sc_state_out_msg = scObj.scStateOutMsg,
                 rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
                 rw_config_msg = fswRwParamMsg,
+                gs_access_msgs = gs_access_msgs
             )            
             self.scSim.AddModelToTask(self.fswTaskName, fsw)
 
@@ -413,46 +448,46 @@ class BasiliskSimulator:
 
 
         ############ RW and Pointing controll debug ############
-        sat_idx = 0
-        fileName = os.path.basename(os.path.splitext(__file__)[0])
-        # num_RWs = len(self.RWs)
-        num_RWs = len(self.cfg.spinUVecs)
+        # sat_idx = 0
+        # fileName = os.path.basename(os.path.splitext(__file__)[0])
+        # # num_RWs = len(self.RWs)
+        # num_RWs = len(self.cfg.spinUVecs)
 
-        dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
-        dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
-        dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
-        dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
+        # dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
+        # dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
+        # dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
+        # dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
 
-        dataRW = []
-        # for i, RW in enumerate(self.RWs):
-        for i in range(num_RWs):
-            dataRW.append(self.rwRecorders[sat_idx][i].u_current)
-        np.set_printoptions(precision=16)
+        # dataRW = []
+        # # for i, RW in enumerate(self.RWs):
+        # for i in range(num_RWs):
+        #     dataRW.append(self.rwRecorders[sat_idx][i].u_current)
+        # np.set_printoptions(precision=16)
 
-        #
-        #   plot the results
-        #
-        timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
-        plt.close("all")  # clears out plots from earlier test runs
+        # #
+        # #   plot the results
+        # #
+        # timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
+        # plt.close("all")  # clears out plots from earlier test runs
 
-        self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
-        figureList = {}
-        pltName = fileName + "1"
-        figureList[pltName] = plt.figure(1)
+        # self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
+        # figureList = {}
+        # pltName = fileName + "1"
+        # figureList[pltName] = plt.figure(1)
 
-        self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
-        pltName = fileName + "2"
-        figureList[pltName] = plt.figure(2)
+        # self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
+        # pltName = fileName + "2"
+        # figureList[pltName] = plt.figure(2)
 
-        self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
-        self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
-        pltName = fileName + "3"
-        figureList[pltName] = plt.figure(4)
+        # self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
+        # self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
+        # pltName = fileName + "3"
+        # figureList[pltName] = plt.figure(4)
 
-        plt.show()
+        # plt.show()
 
-        # close the plots being saved off to avoid over-writing old and new figures
-        plt.close("all")
+        # # close the plots being saved off to avoid over-writing old and new figures
+        # plt.close("all")
 
 
         ########################################################
@@ -629,7 +664,7 @@ class BasiliskSimulator:
             atm.envMaxReach = 1000e3        # [m] cap model above 1000 km
 
             # simSetPlanetEnvironment.exponentialAtmosphere(atm, "earth") # Will give the same response as scaleHeight = 7200
-            logging.debug("[BSK] Exponential atmosphere model has been initialized")
+            logging.debug("[BSK] Exponential atmosphere mgfdgjfodel has been initialized")
 
         
         # If the simulation is configured to not use drag, return None

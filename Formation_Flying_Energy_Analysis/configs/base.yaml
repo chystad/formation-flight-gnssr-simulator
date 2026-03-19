@@ -1,11 +1,11 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 0.1 # [hours] 
-  deltaT: 0.1 # [sec] Solver max time step
+  simulationDuration: 12 # [hours] 
+  deltaT: 0.5 # [sec] Solver max time step
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 3
-  sat_init_source: "oe" # [oe, vec, (tle)]
+  num_satellites: 1
+  sat_init_source: "oe" # [oe, vec]
 
 # Satellite parameters
 SATELLITES:
@@ -72,6 +72,23 @@ SATELLITES:
       10000, 0, 0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.1], [0.], [0.]] 
+
+# Ground station parameters
+GROUND_STATIONS:
+  gs1:
+    gs_tag: gsTrd
+    lat: 63.45    # [deg] Latitude (-90, 90)
+    long: 10.42   # [deg] Longitude (-180, 180)
+    alt: 20       # [m] altitude (> 0)
+    min_elev: 10  # [deg] Min elevation from horizon where satellite-gs contact is possible (0, 90)
+    max_range: -1 # [m] Max distance between satellite-gs where contact is possible (-1 = inf range)
+  gs2:
+    gs_tag: gsSvbd
+    lat: 78.229772
+    long: 15.407786
+    alt: 20
+    min_elev: 5
+    max_range: -1
 
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)

@@ -1,5 +1,6 @@
 import logging
 from typing import Any, Optional, Sequence
+from enum import Enum
 
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros, SimulationBaseClass
@@ -12,6 +13,15 @@ from object_definitions.Satellite_def import Satellite
 MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
+
+
+class PointingMode(str, Enum):
+    INIT = "init"
+    COAST = "coast"
+    COMMS = "comms"
+    CHARGE = "charge"
+    CAPTURE = "capture"
+    ERROR = "error"
 
 
 class FswStack(sysModel.SysModel):
@@ -31,20 +41,54 @@ class FswStack(sysModel.SysModel):
         - attGuidOutMsg         
         - cmdTorqueOutMsg  
         - navAttOutMsg / navTransOutMsg
+
+    =========================================================================================================
+    ATTRIBUTES:
+        modelTag            (str) Name of FswStack instance
+        pointingMode        (PointingMode) State describing the current pointing objective
+        gsAccessMsgs        (list[AccessMsg]) Access msgs for the satellite against all ground stations
+        nav                 (SimpleNav) 
+        guid                (inertial3D)
+        att_err             (attTrackingErr)
+        ctrl                (mrpFeedback) 
+        rw_map              (rwMotorTorque)
+        rwMotorTorqueOutMsg (rwMotorTorqueOutMsg)
+        attGuidOutMsg       (attGuidOutMsg)
+        cmdTorqueOutMsg     (cmdTorqueOutMsg)
+        navAttOutMsg        (navAttOutMsg)
+        navTransOutMsg      (navTransOutMsg)
+
+        _vc_msg         (VehicleConfigMsg) Vehicle configuration message. Hub inertia.
+    =========================================================================================================
+
     """
 
     def __init__(
         self,
-        cfg: Config,
         sat: Satellite,
         sat_idx: int,
-        sc_state_out_msg: Any,
-        rw_speed_out_msg: Any,
-        rw_config_msg: Any,
+        sc_state_out_msg: messaging.SCStatesMsg,
+        rw_speed_out_msg: messaging.RWSpeedMsg,
+        rw_config_msg: messaging.RWArrayConfigMsg,
+        gs_access_msgs: list[messaging.AccessMsg]
     ):
+        """
+        Args:
+        sat (Satellite): current Satellite instance
+        sat_idx (int): Satellite iteration number
+        sc_state_out_msg (messaging.SCStatesMsg): Sc position and velpcity in inerital frame
+        rw_speed_out_msg (messaging.RWSpeedMsg): The angular speeds of all RWs in the SC's RW cluster
+        rw_config_msg (messaging.RWArrayConfigMsg): Desciption of how the SC's RW cluster is defined
+        gs_access_msgs (list[messaging.AccessMsg]): List containing the SC's access to all GSs.
+            Ex: gs_access_msgs[0] will contain the boolean value describing if the spacecraft is within GS[0]'s LOS.
+    
+        """
         super().__init__()
 
         self.ModelTag = f"RwFswStack{sat_idx}"
+        self.pointingMode = PointingMode.INIT
+        self.gsAccessMsgs = gs_access_msgs
+        
 
         # ----------------------------
         # Internal FSW modules
@@ -141,10 +185,14 @@ class FswStack(sysModel.SysModel):
         """
         # Order matters: nav -> guidance -> error -> control -> mapping
         
-        # [TEST] Perform a 180 deg flip maneuver after 2.5 minutes
-        if not self.changed_pointing_obj and (CurrentSimNanos*macros.NANO2MIN > 2.5):
-            self.guid.sigma_R0N = [0.0, 0.0, 1.0]
-            self.changed_pointing_obj = True
+        # # [TEST] Perform a 180 deg flip maneuver after 2.5 minutes
+        # if not self.changed_pointing_obj and (CurrentSimNanos*macros.NANO2MIN > 2.5):
+        #     self.guid.sigma_R0N = [0.0, 0.0, 1.0]
+        #     self.changed_pointing_obj = True
+
+        self._eval_pointing_mode()
+        
+        self._guidance()
 
         self.nav.UpdateState(CurrentSimNanos)
         self.guid.UpdateState(CurrentSimNanos)
@@ -174,6 +222,47 @@ class FswStack(sysModel.SysModel):
         return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
 
 
-    def _guidance(self) -> list[float]:
+    def _guidance(self) -> None:
+        """
+        Updates the desired MRP oerientation 'self.guid.sigma_R0N' based on the current pointing mode
+        """
+        self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
-        return [1., 0., 0.]
+        match self.pointingMode:
+            case PointingMode.COAST:
+                self.guid.sigma_R0N = [1., 0. , 0.]
+            case PointingMode.COMMS:
+                self.guid.sigma_R0N = [0., 1., 0.]
+            case _:
+                raise ValueError(f"Undefined pointing mode reached in {self.ModelTag}")
+        
+    
+    def _eval_pointing_mode(self) -> None:
+        """
+        Updates self.pointingMode based on the objects of intrest within the spacecraft's LOS 
+        in accordance with the designed finite state machine.
+        """
+        old_pointing_mode = self.pointingMode
+
+        any_gs_avail = False
+        avail_gs_idx = -1
+        for i, msg in enumerate(self.gsAccessMsgs):
+            p = msg.read()
+            
+            # NOTE: First-come-first-serve logic.
+            # TODO: Add battery condition
+            # TODO: Add conditional logic with other modes
+            if p.hasAccess:
+                any_gs_avail = True
+                avail_gs_idx = i
+                break
+        
+        if any_gs_avail:
+            self.pointingMode = PointingMode.COMMS
+        else:
+            self.pointingMode = PointingMode.COAST
+        
+        if old_pointing_mode != self.pointingMode:
+            logging.debug(f"[FSW] {self.ModelTag} changed its pointing mode to {self.pointingMode}")
+        
+        

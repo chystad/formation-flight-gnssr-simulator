@@ -11,6 +11,7 @@ from dataclasses_json import dataclass_json
 
 # from object_definitions.TLE_def import TLE
 from object_definitions.Satellite_def import Satellite
+from object_definitions.GroundStation_def import GroundStation
 from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
 
 from Basilisk.utilities import (orbitalMotion, macros, unitTestSupport)
@@ -57,7 +58,8 @@ class Config:
         integrator =            str(    d_cfg['SIMULATION']['integrator'])
         num_satellites =        int(    d_cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    d_cfg['SIMULATION']['sat_init_source'])
-        all_sat_params =                    d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
+        all_sat_params =        d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
+        all_gs_params =         d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]        
 
         # Reaction wheel parameters (same for all satellites)
         RW_model =              str(    d_cfg['RW_PARAMETERS']['RW_model'])
@@ -136,6 +138,11 @@ class Config:
             num_satellites,
             sat_init_source
         )
+
+        # Create GroundStation instances
+        ground_stations = self.generate_ground_station_instances_from_config(
+            all_gs_params
+        )
         
         ##############################
         # Assign instance attributes #
@@ -151,6 +158,9 @@ class Config:
 
         # Satellites
         self.satellites: list[Satellite] = satellites
+
+        # Ground stattions
+        self.ground_stations: list[GroundStation] = ground_stations
 
         # TODO: RW parameters
         self.RW_model: str = RW_model
@@ -236,9 +246,9 @@ class Config:
                                                  num_satellites: int,
                                                  sat_init_source) -> list[Satellite]:
         """
-        Generates a list of Satellite objects that acts like a common reference for both the Skyfield and Basilisk simulations.
-        The number of satellites are defined by 'num_satellites' in default.yaml, 
-        while the individual physical satellite parameters comes from the 'shared_input_data' folder
+        Generates a list of Satellite objects that store all the satellite parameters.
+        The number of satellites are defined by 'num_satellites' in base.yaml, 
+        and the individual satellite parameters are defined in the fields under 'leader', 'follower-1', 'follower-2', etc.
 
         Returns:
             (list[Satellite]): A list of num_satellites Satellite instances
@@ -392,44 +402,92 @@ class Config:
         return satellites
     
 
-    # def save_combined_config(self, config_file_path: str, loaded_default_cfg) -> None:
-    #     """
-    #     [DEPRECIATED] Combine default.yaml, skyfield.yaml, and basilisk.yaml into one file and save as:
-    #         <repo_root>/Bsk_Skf_Propagation_Comparison/output_data/sim_data/<timestamp_str>_cfg.yaml
+    def generate_ground_station_instances_from_config(self, 
+                                                      all_gs_params: dict[str, dict[str, float]]
+                                                      ) -> list[GroundStation]:
 
-    #     Order: default, then skyfield, then basilisk.
-    #     """
-    #     # Ensure output directory exists
-    #     OUTPUT_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        # Loop through all ground stations in all_gs_params
+        ground_stations: list[GroundStation] = []
+        gs_tags: list[str] = []
+        for gs_key, gs_param in all_gs_params.items():
 
-    #     # Build output path using timestamp_str from this Config instance
-    #     out_path = OUTPUT_DATA_SAVE_DIR / f"{self.timestamp_str}_cfg.yaml"
+            # Load all ground station parameters for 'gs_key' of arbitrary/un-verified type
+            gs_tag =    gs_param['gs_tag']
+            lat =       gs_param['lat']
+            long =      gs_param['long']
+            alt =       gs_param['alt']
+            min_elev =  gs_param['min_elev']
+            max_range = gs_param['max_range'] # Can be either int or float
+            
+            # ============ Check 'gs_tag' is of type str and is unique
+            if not isinstance(gs_tag, str):
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'gs_tag' of type 'str'. Got: {type(gs_tag)}")
+            if gs_tag not in gs_tags:
+                gs_tags.append(gs_tag)
+            else:
+                raise ValueError(f"Ground station '{gs_key}' parameter 'gs_tag' is not unique. "
+                                 f"Existing tags prior to this ground station: {gs_tags}")
+            
+            # ============ Check 'lat' is of type float and has value in range [-90S, 90N]
+            if not isinstance(lat, float):
+                try:
+                    lat = float(lat)
+                except:
+                    raise ValueError(f"Expected ground station '{gs_key}' parameter 'lat' of type 'float'. Got: {type(lat)}")
+            if (lat < -90) or (lat > 90):
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'lat' to be in range [-90, 90]. Got: {lat}")
+            
+            # ============ Check 'long' is of type float and has value in range [-180W, 180E]
+            if not isinstance(long, float):
+                try: 
+                    long = float(long)
+                except:
+                    raise ValueError(f"Expected ground station '{gs_key}' parameter 'long' of type 'float'. Got: {type(long)}")
+            if (long < -180) or (long > 180):
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'long' to be in range [-180, 180]. Got: {long}")
+            
+            # ============ Check 'alt' is of type float and has value in range [0, 10'000]
+            if not isinstance(alt, float):
+                try:
+                    alt = float(alt)
+                except:
+                    raise ValueError(f"Expected ground station '{gs_key}' parameter 'alt' of type 'float'. Got: {type(alt)}")
+            if (alt < 0) or (alt > 10000):
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'alt' to be in range [0, 10'000]. Got: {alt}")
+            
+            # ============ Check 'min_elev' is of type float and has value in range [0, 90]
+            if not isinstance(min_elev, float):
+                try:
+                    min_elev = float(min_elev)
+                except:
+                    raise ValueError(f"Expected ground station '{gs_key}' parameter 'min_elev' of type 'float'. Got: {type(min_elev)}")
+            if (min_elev < 0) or (min_elev > 90):
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'min_elev' to be in range [0, 90]. Got: {min_elev}")
+            
+            # ============ Check 'max_range' is int if value = -1 and float otherwise with positive value
+            if isinstance(max_range, int):
+                if not max_range == -1:
+                    max_range = float(max_range)
+            elif not isinstance(max_range, float):
+                try:
+                    max_range = float(max_range)
+                except:
+                    raise ValueError(f"Expected ground station '{gs_key}' parameter 'max_range' of type 'float | int'. Got: {type(max_range)}")
+            if isinstance(max_range, float) and max_range <= 0:
+                raise ValueError(f"Expected ground station '{gs_key}' parameter 'max_range' to be -1 or greater than zero. Got: {max_range}")
 
-    #     # Config paths
-    #     default_cfg_path = Path(config_file_path)
-    #     skyfield_cfg_path = Path(loaded_default_cfg['SKYFIELD']['config_path'])
-    #     basilisk_cfg_path = Path(loaded_default_cfg['BASILISK']['config_path'])
+            # Initialize GroundStation instance
+            gs = GroundStation(
+                gs_tag=gs_tag,
+                latitude=lat,
+                longitude=long,
+                altitude=alt,
+                min_elev=min_elev,
+                max_range=max_range
+            )
+
+            # Append to list
+            logging.debug(f"[CFG] Appending {gs_tag} to 'ground_stations'")
+            ground_stations.append(gs)
         
-    #     # Read raw text from each config file in the specified order
-    #     with open(default_cfg_path, "r") as f_default:
-    #         default_text = f_default.read()
-
-    #     with open(skyfield_cfg_path, "r") as f_skf:
-    #         skyfield_text = f_skf.read()
-
-    #     with open(basilisk_cfg_path, "r") as f_bsk:
-    #         basilisk_text = f_bsk.read()
-
-    #     # Combine texts: default, then skyfield, then basilisk
-    #     # Add blank lines between sections for readability
-    #     combined_text = (
-    #         default_text.rstrip() + "\n\n"
-    #         + skyfield_text.rstrip() + "\n\n"
-    #         + basilisk_text.rstrip() + "\n"
-    #     )
-
-    #     # Write combined config snapshot
-    #     with open(out_path, "w") as f_out:
-    #         f_out.write(combined_text)
-
-    #     logging.info(f"[CFG] Combined config written to: {out_path}")
+        return ground_stations
