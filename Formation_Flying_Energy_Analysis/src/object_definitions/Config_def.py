@@ -244,12 +244,17 @@ class Config:
     def generate_satellite_instances_from_config(self, 
                                                  all_sat_params: dict[str, dict[str, float]],
                                                  num_satellites: int,
-                                                 sat_init_source) -> list[Satellite]:
+                                                 sat_init_source: str) -> list[Satellite]:
         """
         Generates a list of Satellite objects that store all the satellite parameters.
         The number of satellites are defined by 'num_satellites' in base.yaml, 
         and the individual satellite parameters are defined in the fields under 'leader', 'follower-1', 'follower-2', etc.
 
+        Args:
+            all_sat_params (dict[str, dict[str, float]]): Loaded dictionaty of all satellites' parameters
+            num_satellites (int): The number of satellites to include from 'all_sat_params'
+            sat_init_source (str): Chooce which method to use for defining the satellite initial state 
+        
         Returns:
             (list[Satellite]): A list of num_satellites Satellite instances
         """
@@ -341,6 +346,41 @@ class Config:
                 raise ValueError(f"'I_B' parameter for satellite '{sat_name}' is of type {type(I_B)} (expected list)")
             
 
+            # Check that r_BP_B from config has elements of type int, has 3 elements and has length == 1
+            r_BP_B = sat_param['r_BP_B']
+            if isinstance(r_BP_B, list):
+                if len(r_BP_B) != 3:
+                    raise ValueError(f"Solar panel face vector parameter 'r_BP_B' for satellite {sat_name} contains {len(r_BP_B)} elements (expected 3)")
+                for i, comp in enumerate(r_BP_B):
+                    if not isinstance(comp, int):
+                        try:
+                            comp = int(comp)
+                            r_BP_B[i] = comp
+                        except:
+                            raise ValueError(f"Component nr {i} in 'r_BP_B' for satellite {sat_name} failed to convert into type 'int'")
+                if not np.isclose(np.linalg.norm(r_BP_B), 1): 
+                    raise ValueError(f"The norm of 'r_BP_B' for satellite {sat_name} is not sufficiently close to '1' (norm: {np.linalg.norm(r_BP_B)})")
+            else:
+                raise ValueError(f"Solar panel face vector parameter 'r_BP_B' for satellite {sat_name} is of type: {type(r_BP_B)} (expected 'list')")
+
+
+            # Check that r_BA_B from config has elements of type int, has 3 elements and has length == 1
+            r_BA_B = sat_param['r_BA_B']
+            if isinstance(r_BA_B, list):
+                if len(r_BA_B) != 3:
+                    raise ValueError(f"Antenna face vector parameter 'r_BA_B' for satellite {sat_name} contains {len(r_BA_B)} elements (expected 3)")
+                for i, comp in enumerate(r_BA_B):
+                    if not isinstance(comp, int):
+                        try:
+                            comp = int(comp)
+                            r_BA_B[i] = comp
+                        except:
+                            raise ValueError(f"Component nr {i} in 'r_BA_B' for satellite {sat_name} failed to convert into type 'int'")
+                if not np.isclose(np.linalg.norm(r_BA_B), 1): 
+                    raise ValueError(f"The norm of 'r_BA_B' for satellite {sat_name} is not sufficiently close to '1' (norm: {np.linalg.norm(r_BA_B)})")
+            else:
+                raise ValueError(f"Antenna face vector parameter 'r_BA_B' for satellite {sat_name} is of type: {type(r_BA_B)} (expected 'list')")
+
             # Check that init_att from config is correct
             init_att = sat_param['init_att']
             if isinstance(init_att, list):
@@ -384,6 +424,8 @@ class Config:
                 C_R = sat_param['C_R'],
                 A_srp = sat_param['A_srp'],
                 I_B = I_B,
+                r_BP_B = r_BP_B,
+                r_BA_B = r_BA_B,
                 init_OEs = sat_init_OEs,
                 init_pos = sat_init_pos,
                 init_vel = sat_init_vel,

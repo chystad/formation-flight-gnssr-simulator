@@ -20,6 +20,8 @@ class Satellite:
             C_R: float, # Radiation pressure coefficient (0 reflecting, 1 absorbing)
             A_srp: float, # [m^2] Cross-section area perpendicular to the Sun-vector 
             I_B: list[float], # [kg m^2] Inertia of hub about point Bc in B frame components
+            r_BP_B: list[int], # Unit vector pointing towards the satellite face with the largest solar panel area expressed in B
+            r_BA_B: list[int], # Unit vector pointing towards the satellite face with the communication antennas expressed in B
             init_OEs: Optional[orbitalMotion.ClassicElements], # Orbital elements used to calculate init cond
             init_pos: Optional[NDArray[np.float64]], # 3 element pos vec
             init_vel: Optional[NDArray[np.float64]],  # 3 element vel vec
@@ -44,6 +46,8 @@ class Satellite:
         self.C_R: float= C_R
         self.A_srp: float = A_srp
         self.I_B: list[float] = I_B
+        self.r_BP_B: list[int] = r_BP_B
+        self.r_BA_B: list[int] = r_BA_B
         self.init_OEs: Optional[orbitalMotion.ClassicElements] = init_OEs
         self.init_pos: Optional[NDArray[np.float64]] = init_pos
         self.init_vel: Optional[NDArray[np.float64]] = init_vel

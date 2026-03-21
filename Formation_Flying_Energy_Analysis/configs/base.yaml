@@ -1,10 +1,10 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 12 # [hours] 
+  simulationDuration: 0.5 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 1
+  num_satellites: 2
   sat_init_source: "oe" # [oe, vec]
 
 # Satellite parameters
@@ -18,6 +18,8 @@ SATELLITES:
     I_B: [0.06666667, 0.,         0.,        
           0.,         0.08666667, 0.,
           0.,         0.,         0.03333333] # [kgm^2] Inertia of hub about point Bc in B frame components
+    r_BP_B: [0, 0, 1] # Unit vector from body (B) to spacecraft face with the largest panel area (P) expressed in B
+    r_BA_B: [0, 1, 0] # Unit vector from body (B) to spacecraft face with communication antenna (A) expressed in B
     init_OEs:
       a: 6798.        # [km]  Semi-major axis
       e: 0.004161     # [-]   Eccentricity
@@ -39,6 +41,8 @@ SATELLITES:
     I_B: [0.06666667, 0.,         0.,        
           0.,         0.08666667, 0.,
           0.,         0.,         0.03333333]
+    r_BP_B: [0, 0, 1]
+    r_BA_B: [0, 1, 0]
     init_OEs:
       a: 6798.
       e: 0.004161
@@ -60,6 +64,8 @@ SATELLITES:
     I_B: [0.1, 0.,         0.,        
           0.,         0.1, 0.,
           0.,         0.,         0.1]
+    r_BP_B: [0, 0, 1]
+    r_BA_B: [0, 1, 0]
     init_OEs:
       a: 6798.
       e: 0.004161
@@ -77,11 +83,11 @@ SATELLITES:
 GROUND_STATIONS:
   gs1:
     gs_tag: gsTrd
-    lat: 63.45    # [deg] Latitude (-90, 90)
-    long: 10.42   # [deg] Longitude (-180, 180)
-    alt: 20       # [m] altitude (> 0)
-    min_elev: 10  # [deg] Min elevation from horizon where satellite-gs contact is possible (0, 90)
-    max_range: -1 # [m] Max distance between satellite-gs where contact is possible (-1 = inf range)
+    lat: 63.418306  # [deg] Latitude (-90, 90)
+    long: 10.399639 # [deg] Longitude (-180, 180)
+    alt: 20         # [m] altitude (> 0)
+    min_elev: 10    # [deg] Min elevation from horizon where satellite-gs contact is possible (0, 90)
+    max_range: -1   # [m] Max distance between satellite-gs where contact is possible (-1 = inf range)
   gs2:
     gs_tag: gsSvbd
     lat: 78.229772
