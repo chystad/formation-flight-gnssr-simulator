@@ -100,8 +100,8 @@ GROUND_STATIONS:
 SP_PARAMETERS:
   p1:
     nHat_B: [0, 0, 1]     # Panel normal unit vec in body (B)
-    panel_area: 0.18      # [m^2] Panel area 
-    panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy
+    panel_area: 0.18      # [m^2] Panel area (> 0)
+    panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
   p2:
     nHat_B: [0, 0, -1]
     panel_area: 0.06

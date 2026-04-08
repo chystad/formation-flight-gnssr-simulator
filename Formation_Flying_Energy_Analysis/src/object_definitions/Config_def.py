@@ -12,6 +12,7 @@ from dataclasses_json import dataclass_json
 # from object_definitions.TLE_def import TLE
 from object_definitions.Satellite_def import Satellite
 from object_definitions.GroundStation_def import GroundStation
+from object_definitions.SolarPanel_def import SolarPanel
 from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
 
 from Basilisk.utilities import (orbitalMotion, macros, unitTestSupport)
@@ -40,6 +41,8 @@ class Config:
             all_sat_params
             timestamp_str (str):            Used in the naming of data files. str holding the real-world simulation start time.
             satellites (list[Satellite]):   One Satellite instance for each satellite described in the default config.
+            ground_stations (list[GroundStation]): 
+            solar_panels (list[SolarPanel]):
             b_set (BasiliskSettings):       BasiliskSettings instance describing the Basilisk simulation settings
             s_set (SkyfieldSettings):       SkyfieldSettings instance describing the Skyfield simulation settings     
         =========================================================================================================
@@ -59,7 +62,8 @@ class Config:
         num_satellites =        int(    d_cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    d_cfg['SIMULATION']['sat_init_source'])
         all_sat_params =        d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
-        all_gs_params =         d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]        
+        all_gs_params =         d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
+        all_sp_params =         d_cfg['SP_PARAMETERS'] # dict [str, dict[str, Any]]   
 
         # Reaction wheel parameters (same for all satellites)
         RW_model =              str(    d_cfg['RW_PARAMETERS']['RW_model'])
@@ -139,6 +143,10 @@ class Config:
             sat_init_source
         )
 
+        solar_panels = self.generate_solar_panel_instances_from_config(
+            all_sp_params
+        )
+
         # Create GroundStation instances
         ground_stations = self.generate_ground_station_instances_from_config(
             all_gs_params
@@ -162,7 +170,10 @@ class Config:
         # Ground stattions
         self.ground_stations: list[GroundStation] = ground_stations
 
-        # TODO: RW parameters
+        # Solar panel parameters
+        self.solar_panels: list[SolarPanel] = solar_panels
+
+        # RW parameters
         self.RW_model: str = RW_model
         self.spinUVecs: list[list[float]] = spinUVecs
         self.init_rpm: float = init_rpm 
@@ -531,5 +542,76 @@ class Config:
             # Append to list
             logging.debug(f"[CFG] Appending {gs_tag} to 'ground_stations'")
             ground_stations.append(gs)
-        
+    
         return ground_stations
+
+
+
+    def generate_solar_panel_instances_from_config(self, 
+                                                   all_sp_params: dict[str, dict[str, float]]
+                                                   ) -> list[SolarPanel]:
+        
+        # Loop through all solar panels in all_sp_params
+        solar_panels: list[SolarPanel] = []
+        sat_panel_faces: list[list[int]] = []
+        for sp_key, sp_param in all_sp_params.items():
+            
+            # Load all ground station parameters for 'gs_key' of arbitrary/un-verified type
+            nHat_B =           sp_param['nHat_B']
+            panel_area =       sp_param['panel_area']
+            panel_efficiency = sp_param['panel_efficiency']
+
+            # ============ Check 'nHat_B' is a list of 3 int, with a vector norm of 1, and mounted on a unique sat face
+            if not isinstance(nHat_B, list):
+                raise ValueError(f"Expected solar panel '{sp_key}' parameter 'nHat_B' of type 'list'. Got: {type(nHat_B)}")
+            else:
+                if not len(nHat_B) == 3:
+                    raise ValueError(f"Expected solar panel '{sp_key}' parameter 'nHat_B' to have 3 elements. Got {len(nHat_B)}")
+                for i, elem in enumerate(nHat_B):
+                    if not isinstance(elem, int):
+                        try:
+                            elem = int(elem)
+                            nHat_B[i] = elem
+                        except:
+                            raise ValueError(f"Expected solar panel '{sp_key}' parameter 'nHat_B' element nr {i} to be of type 'int'. Got: {type(elem)}")
+                norm = np.linalg.norm(np.array(nHat_B))
+                if not norm == 1:
+                    raise ValueError(f"Expected solar panel '{sp_key}' parameter 'nHat_B' to be of unit length. Got vector length {norm}")
+            
+                if nHat_B in sat_panel_faces:
+                    raise ValueError(f"There has already been generated a solar panel on the satellite face {nHat_B}")
+                else:
+                    sat_panel_faces.append(nHat_B)
+
+            # ============ Check 'panel_area' is a non-negative float
+            if not isinstance(panel_area, float):
+                try:
+                    panel_area = float(panel_area)
+                except:
+                    raise ValueError(f"Expected solar panel '{sp_key}' parameter 'panel_area' of type 'float'. Got: {type(panel_area)}")
+            if (panel_area <= 0):
+                raise ValueError(f"Expected solar panel '{sp_key}' parameter 'panel_area' to be bigger than 0m^2. Got: {panel_area}")
+            if (panel_area > 100):
+                raise ValueError(f"Unrealistic solar panel area 'panel_area' detected for panel '{sp_key}'. Got: {panel_area}")
+            
+            # ============ Check 'panel_efficiency' is a float in range [0,1]
+            if not isinstance(panel_efficiency, float):
+                try:
+                    panel_efficiency = float(panel_efficiency)
+                except:
+                    raise ValueError(f"Expected solar panel '{sp_key}' parameter 'panel_efficiency' of type 'float'. Got: {type(panel_efficiency)}")
+            if (panel_efficiency < 0) or (panel_efficiency > 1):
+                raise ValueError(f"Expected solar panel '{sp_key}' parameter 'panel_area' to be in range [0, 1]. Got: {panel_efficiency}")
+            
+            # Initialize SolarPanel instance
+            solar_panel = SolarPanel(
+                nHat_B = nHat_B,
+                panel_area = panel_area,
+                panel_efficiency = panel_efficiency
+            )
+            
+            # Add to list
+            logging.debug(f"[CFG] Appending {sp_key} to 'solar_panels'")
+            solar_panels.append(solar_panel)
+
+        return solar_panels               
