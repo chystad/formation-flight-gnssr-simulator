@@ -189,11 +189,10 @@ class BasiliskSimulator:
         atm = self.conditional_atmosphere_init()
 
 
-
-
-
-
-        # ======== TESTING GROUND STATIONS ======== #
+        ##############################################
+        # Initialize Ground Stations #
+        ##############################################
+        gs_state_msgs: list[messaging.GroundStateMsg] = []
         for i, gs in enumerate(cfg.ground_stations):
             groundStation = groundLocation.GroundLocation()
             groundStation.ModelTag = gs.gs_tag
@@ -205,11 +204,11 @@ class BasiliskSimulator:
 
             # Append to stable list
             self.groundStations.append(groundStation)
+            gs_state_msgs.append(groundStation.currentGroundStateOutMsg)
 
             # Add to task
             self.scSim.AddModelToTask(self.simTaskName, groundStation)
 
-        # ============================================ #
 
 
 
@@ -230,9 +229,8 @@ class BasiliskSimulator:
         # get satellites from config
         satellites = self.cfg.satellites
 
-        # Define all satellite parameters, attach all applied forces, and make it part of the 
         #################################################################################################
-        # Define all spacecraft objects, attach all force models, add it and recorders to the simulator #
+        # Loop through all satellites to define all spacecraft objects, attach all force models and FSW #
         #################################################################################################
         for i, sat in enumerate(satellites):
 
@@ -240,7 +238,7 @@ class BasiliskSimulator:
             scObj = spacecraft.Spacecraft()
             scObj.ModelTag = sat.name
             scObj.hub.mHub = sat.m_s
-            scObj.hub.r_BcB_B = [[0.0], [0.0], [0.0]]  # m - position vector of body-fixed point B relative to CM
+            scObj.hub.r_BcB_B = [[0.0], [0.0], [0.0]]  # [m] position vector of body-fixed point B relative to CM
             scObj.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(sat.I_B) # [kg m^2] Inertia of hub about point Bc in B frame components
 
             # Add spacecraft object to the simulation process
@@ -272,14 +270,14 @@ class BasiliskSimulator:
             gravFactory.addBodiesTo(scObj)
             
 
-            # ---- Drag effector (exponential density + cannonball) ----
+            # ---- Drag effector ----
             scObj = self.conditional_drag_effector(sat, scObj, atm)
             
             
-            # ---- SRP effector (cannonball) ----
+            # ---- SRP effector ----
             # Register this spacecraft with the eclipse model to get its own eclipse msg
             scObj = self.conditional_srp_effector(sat, scObj, sunMsg, eclipseObj)
-
+            
 
             # ---- Reaction Wheel State Effector ---- 
             # Create RWs from config, create a RW effector and attach to the spacecraft
@@ -291,9 +289,17 @@ class BasiliskSimulator:
             for j, gs in enumerate(self.groundStations):
                 gs.addSpacecraftToModel(scObj.scStateOutMsg)
                 gs_access_msgs.append(gs.accessOutMsgs[-1]) # -1 idx refers to the latest added sc (current iteration sat)
+
             
+            # ----  Get the spacecraft-sun eclipse msg for fsw ---- 
+            assert eclipseObj is not None
+            sun_eclipse_msg: messaging.EclipseMsg = eclipseObj.eclipseOutMsgs[-1] 
+            # TODO: Using index '-1' assumes that no other SC have been added to the eclipse model since 'conditional_srp_effector'
+            #       This will never actually be a problem, but it might be fragile to assume this. 
+            #       Move this line inside 'conditional_srp_effector' or use satellite index instead. 
 
             # ---- Flight software ----
+            assert sunMsg is not None
             fswRwParamMsg = rwFactory.getConfigMessage()
             self.fswRwParamMsgs.append(fswRwParamMsg)
             fsw = FswStack(
@@ -302,7 +308,10 @@ class BasiliskSimulator:
                 sc_state_out_msg = scObj.scStateOutMsg,
                 rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
                 rw_config_msg = fswRwParamMsg,
-                gs_access_msgs = gs_access_msgs
+                gs_access_msgs = gs_access_msgs,
+                gs_state_msgs = gs_state_msgs,
+                sun_eclipse_msg = sun_eclipse_msg,
+                sun_state_msg = sunMsg
             )            
             self.scSim.AddModelToTask(self.fswTaskName, fsw)
 
@@ -448,46 +457,46 @@ class BasiliskSimulator:
 
 
         ############ RW and Pointing controll debug ############
-        # sat_idx = 0
-        # fileName = os.path.basename(os.path.splitext(__file__)[0])
-        # # num_RWs = len(self.RWs)
-        # num_RWs = len(self.cfg.spinUVecs)
+        sat_idx = 0
+        fileName = os.path.basename(os.path.splitext(__file__)[0])
+        # num_RWs = len(self.RWs)
+        num_RWs = len(self.cfg.spinUVecs)
 
-        # dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
-        # dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
-        # dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
-        # dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
+        dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
+        dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
+        dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
+        dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
 
-        # dataRW = []
-        # # for i, RW in enumerate(self.RWs):
-        # for i in range(num_RWs):
-        #     dataRW.append(self.rwRecorders[sat_idx][i].u_current)
-        # np.set_printoptions(precision=16)
+        dataRW = []
+        # for i, RW in enumerate(self.RWs):
+        for i in range(num_RWs):
+            dataRW.append(self.rwRecorders[sat_idx][i].u_current)
+        np.set_printoptions(precision=16)
 
-        # #
-        # #   plot the results
-        # #
-        # timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
-        # plt.close("all")  # clears out plots from earlier test runs
+        #
+        #   plot the results
+        #
+        timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
+        plt.close("all")  # clears out plots from earlier test runs
 
-        # self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
-        # figureList = {}
-        # pltName = fileName + "1"
-        # figureList[pltName] = plt.figure(1)
+        self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
+        figureList = {}
+        pltName = fileName + "1"
+        figureList[pltName] = plt.figure(1)
 
-        # self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
-        # pltName = fileName + "2"
-        # figureList[pltName] = plt.figure(2)
+        self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
+        pltName = fileName + "2"
+        figureList[pltName] = plt.figure(2)
 
-        # self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
-        # self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
-        # pltName = fileName + "3"
-        # figureList[pltName] = plt.figure(4)
+        self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
+        self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
+        pltName = fileName + "3"
+        figureList[pltName] = plt.figure(4)
 
-        # plt.show()
+        plt.show()
 
-        # # close the plots being saved off to avoid over-writing old and new figures
-        # plt.close("all")
+        # close the plots being saved off to avoid over-writing old and new figures
+        plt.close("all")
 
 
         ########################################################
@@ -742,7 +751,7 @@ class BasiliskSimulator:
 
     def conditional_eclipse_init(self, 
                              spiceObj: spiceInterface.SpiceInterface
-                             ) -> tuple[Optional[Any], Optional[eclipse.Eclipse]]:
+                             ) -> tuple[Optional[messaging.SpicePlanetStateMsg], Optional[eclipse.Eclipse]]:
         """
         Initializes an eclipse model
         

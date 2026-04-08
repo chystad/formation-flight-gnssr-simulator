@@ -1,9 +1,11 @@
 import logging
+import numpy as np
 from typing import Any, Optional, Sequence
 from enum import Enum
 
 from Basilisk.architecture import messaging, sysModel
-from Basilisk.utilities import macros, SimulationBaseClass
+from Basilisk.utilities import macros
+from Basilisk.utilities import RigidBodyKinematics as rbk
 from Basilisk.fswAlgorithms import mrpFeedback, attTrackingError, inertial3D, rwMotorTorque
 from Basilisk.simulation import simpleNav
 
@@ -13,7 +15,8 @@ from object_definitions.Satellite_def import Satellite
 MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
-
+SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state
+SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state
 
 class PointingMode(str, Enum):
     INIT = "init"
@@ -47,6 +50,8 @@ class FswStack(sysModel.SysModel):
         modelTag            (str) Name of FswStack instance
         pointingMode        (PointingMode) State describing the current pointing objective
         gsAccessMsgs        (list[AccessMsg]) Access msgs for the satellite against all ground stations
+        gsPosMsgs           (list[GroundStateMsg]) Contain 'r_LN_N' describing the GS position vector relative to inertial frame origin in inertial coordinates.
+        sunEclipseMsg       (EclipseMsgPayload) Contains 'shadowFactor' property used to evaluate Sun illumination on the SC
         nav                 (SimpleNav) 
         guid                (inertial3D)
         att_err             (attTrackingErr)
@@ -70,7 +75,10 @@ class FswStack(sysModel.SysModel):
         sc_state_out_msg: messaging.SCStatesMsg,
         rw_speed_out_msg: messaging.RWSpeedMsg,
         rw_config_msg: messaging.RWArrayConfigMsg,
-        gs_access_msgs: list[messaging.AccessMsg]
+        gs_access_msgs: list[messaging.AccessMsg],
+        gs_state_msgs: list[messaging.GroundStateMsg],
+        sun_eclipse_msg: messaging.EclipseMsg,
+        sun_state_msg: messaging.SpicePlanetStateMsg
     ):
         """
         Args:
@@ -88,6 +96,15 @@ class FswStack(sysModel.SysModel):
         self.ModelTag = f"RwFswStack{sat_idx}"
         self.pointingMode = PointingMode.INIT
         self.gsAccessMsgs = gs_access_msgs
+        self.gsStateMsgs = gs_state_msgs
+        self.selectedGsIdx: Optional[int] = None 
+        self.sunEclipseMsg = sun_eclipse_msg
+        self.sunStateMsg = sun_state_msg
+
+        ## temp
+        self.oldSunEclipseMsgShadowFactor = None
+        self.prevGsPosPrintHours = 0.
+        ##
         
 
         # ----------------------------
@@ -190,11 +207,38 @@ class FswStack(sysModel.SysModel):
         #     self.guid.sigma_R0N = [0.0, 0.0, 1.0]
         #     self.changed_pointing_obj = True
 
-        self._eval_pointing_mode()
-        
-        self._guidance()
 
+        # ========== [TEST] ========== #
+        # shadowFac = self.sunEclipseMsg.read().shadowFactor
+
+        # if shadowFac != self.oldSunEclipseMsgShadowFactor:
+        #     print(f"new eclipse state: {shadowFac} " 
+        #           f"@: {CurrentSimNanos*macros.NANO2MIN}")
+            
+        # self.oldSunEclipseMsgShadowFactor = shadowFac
+        # ============================ #
+
+
+        # ========== [GroundLocation position in N] ========== #
+        # timeBetweenGsPosPrintsHours = 0.8
+        # if (self.prevGsPosPrintHours + timeBetweenGsPosPrintsHours) <= CurrentSimNanos*macros.NANO2HOUR or (CurrentSimNanos == 0):
+            
+        #     for i, gs in enumerate(self.gsStateMsgs):
+        #         gsPos = gs.read().r_LN_N
+
+        #         print(gsPos)
+        #         print(np.linalg.norm(gsPos))
+
+        #         self.prevGsPosPrintHours = CurrentSimNanos*macros.NANO2HOUR
+
+        # Conclusion from this little experiment: The Basilisk inerital frame (N) is an ECI frame. 
+        # The vector describing the ground locations change with time -> Not ECEF!!
+
+        # ==================================================== #
+        
         self.nav.UpdateState(CurrentSimNanos)
+        self._eval_pointing_mode(CurrentSimNanos)
+        self._guidance(CurrentSimNanos)
         self.guid.UpdateState(CurrentSimNanos)
         self.att_err.UpdateState(CurrentSimNanos)
         self.ctrl.UpdateState(CurrentSimNanos)
@@ -222,47 +266,194 @@ class FswStack(sysModel.SysModel):
         return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
 
 
-    def _guidance(self) -> None:
+    def _guidance(self, CurrentSimNanos: int) -> None:
         """
         Updates the desired MRP oerientation 'self.guid.sigma_R0N' based on the current pointing mode
         """
         self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
+        # TODO: Compute and apply the actual correct pointing orientation based on the current pointingMode
         match self.pointingMode:
             case PointingMode.COAST:
-                self.guid.sigma_R0N = [1., 0. , 0.]
+                """
+                Point solar panels towards Sun (even though the Earth eclipses the Sun), and try to achieve NADIR antenna pointing
+                """
+                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+
+                # Get spacecraft position relative to Earth in inertial frame 
+                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+                r_NB_N = - r_BN_N
+                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+
+                # Get Sun position vector relative to the Earth in inertial frame
+                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+                r_SB_N = r_SN_N - r_BN_N
+                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+                # Want antenna to point nadir as much as possible
+                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+                a_hat = a / np.linalg.norm(a)
+                
+                z_hat = r_SB_N_hat
+                y_hat = a_hat
+                x_hat = np.cross(y_hat, z_hat)
+                z_hat = np.cross(x_hat, y_hat)
+
+                # Direction cosine matrix for the desired attitude
+                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+                # Convert into desired Modified Rodrigues Parameters
+                mrp_D = rbk.C2MRP(C_DN_N)
+                
+                # Publish the desired attitude
+                self.guid.sigma_R0N = mrp_D
+
+            
             case PointingMode.COMMS:
-                self.guid.sigma_R0N = [0., 1., 0.]
+                """
+                Point antenna towards available ground station, and try to point solar panels towards the sun
+                """
+                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+
+                # Get the available GS position relative to Earth in inertial frame
+                assert self.selectedGsIdx is not None
+                r_LN_N = np.array(self.gsStateMsgs[self.selectedGsIdx].read().r_LN_N)
+
+                # Get spacecraft position relative to Earth in inertial frame 
+                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+                
+                # Unit vector from spacecraft Body to selected ground station (desired antenna direction)
+                r_LB_N = r_LN_N - r_BN_N
+                r_LB_N_hat = r_LB_N / np.linalg.norm(r_LB_N)
+
+                # Get Sun position vector relative to the Earth in inertial frame
+                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+                # Unit vector from spacecraft Body to the Sun (sun vector)
+                r_SB_N = r_SN_N - r_BN_N
+                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+                # Project the sun vector into the plane normal to the desired antenna direction vector)
+                # https://www.maplesoft.com/support/help/Maple/view.aspx?path=MathApps/ProjectionOfVectorOntoPlane
+                s = r_SB_N_hat - np.dot(r_SB_N_hat, r_LB_N_hat)/np.linalg.norm(r_LB_N_hat)**2 * r_LB_N_hat
+                s_hat = s / np.linalg.norm(s)
+
+                # TODO: Make flexible for other solar panel / antenna face configurations
+                y_hat = r_LB_N_hat
+                z_hat = s_hat
+                x_hat = np.cross(y_hat, z_hat)
+                z_hat = np.cross(x_hat, y_hat)
+
+                # Direction cosine matrix for the desired attitude
+                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+                # Convert into desired Modified Rodrigues Parameters
+                mrp_D = rbk.C2MRP(C_DN_N)
+                
+                # Publish the desired attitude
+                self.guid.sigma_R0N = mrp_D
+
+
+
+            case PointingMode.CHARGE:
+                """
+                Point solar panels towards Sun, and try to achieve NADIR antenna pointing
+                """
+                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+
+                # Get spacecraft position relative to Earth in inertial frame 
+                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+                r_NB_N = - r_BN_N
+                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+
+                # Get Sun position vector relative to the Earth in inertial frame
+                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+                r_SB_N = r_SN_N - r_BN_N
+                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+                # Want antenna to point nadir as much as possible
+                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+                a_hat = a / np.linalg.norm(a)
+                
+                z_hat = r_SB_N_hat
+                y_hat = a_hat
+                x_hat = np.cross(y_hat, z_hat)
+                z_hat = np.cross(x_hat, y_hat)
+
+                # Direction cosine matrix for the desired attitude
+                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+                # Convert into desired Modified Rodrigues Parameters
+                mrp_D = rbk.C2MRP(C_DN_N)
+                
+                # Publish the desired attitude
+                self.guid.sigma_R0N = mrp_D
+
             case _:
                 raise ValueError(f"Undefined pointing mode reached in {self.ModelTag}")
         
     
-    def _eval_pointing_mode(self) -> None:
+    def _eval_pointing_mode(self, CurrentSimNanos: int) -> None:
         """
         Updates self.pointingMode based on the objects of intrest within the spacecraft's LOS 
         in accordance with the designed finite state machine.
         """
+        
         old_pointing_mode = self.pointingMode
+        
+        # Initialize position-dependent logical parameters 
+        canCap = False # TODO
+        canCom = False # True if a ground station is within the spacecraft's LOS
+        canChar = False # True if the spacecraft is illuminated by the sun with enough intensity
 
-        any_gs_avail = False
-        avail_gs_idx = -1
+        # Initialize battery-dependent logical parameters
+        capBatt = False # TODO
+        comBatt = False  # TODO
+        critBatt = False  # TODO
+
+
+        # ---- Decide if the spacecraft can charge (set canChar) ---- 
+        # Fraction of illumination due to eclipse. 0 = fully shadowed, 1 = fully illuminated.
+        shadowFac = self.sunEclipseMsg.read().shadowFactor 
+        if (old_pointing_mode == PointingMode.CHARGE) and (shadowFac >= SHADOWFAC_EXIT_THRESHOLD):
+            canChar = True
+        elif (old_pointing_mode == PointingMode.CHARGE) and (shadowFac < SHADOWFAC_EXIT_THRESHOLD):
+            canChar = False
+        elif (old_pointing_mode != PointingMode.CHARGE) and (shadowFac >= SHADOWFAC_ENTER_THRESHOLD):
+            canChar = True
+        else:
+            canChar = False
+
+        
+        # ---- Decide if the spacecraft can communicate (set canCom) ---- 
         for i, msg in enumerate(self.gsAccessMsgs):
             p = msg.read()
             
             # NOTE: First-come-first-serve logic.
-            # TODO: Add battery condition
-            # TODO: Add conditional logic with other modes
-            if p.hasAccess:
-                any_gs_avail = True
-                avail_gs_idx = i
+            # TODO: Add some logic to select the "best" ground station if multiple are available
+            if int(p.hasAccess) == 1:
+                canCom = True
+                self.selectedGsIdx = i
                 break
+        if not canCom:
+            self.selectedGsIdx = None
+    
         
-        if any_gs_avail:
+        # ---- Mode switching logic ---- #
+        # TODO: Add battery states and check capture state
+        if canCom:
             self.pointingMode = PointingMode.COMMS
+        elif canChar:
+            self.pointingMode = PointingMode.CHARGE
         else:
             self.pointingMode = PointingMode.COAST
         
         if old_pointing_mode != self.pointingMode:
-            logging.debug(f"[FSW] {self.ModelTag} changed its pointing mode to {self.pointingMode}")
-        
-        
+            logging.debug(f"[FSW] {self.ModelTag} changed its pointing mode to {self.pointingMode} @ time: {CurrentSimNanos*macros.NANO2MIN} minutes")
