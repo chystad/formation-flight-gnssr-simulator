@@ -77,7 +77,7 @@ class FswStack(sysModel.SysModel):
         rw_config_msg: messaging.RWArrayConfigMsg,
         gs_access_msgs: list[messaging.AccessMsg],
         gs_state_msgs: list[messaging.GroundStateMsg],
-        sun_eclipse_msg: messaging.EclipseMsg,
+        sun_eclipse_msg: Optional[messaging.EclipseMsg],
         sun_state_msg: messaging.SpicePlanetStateMsg
     ):
         """
@@ -98,6 +98,7 @@ class FswStack(sysModel.SysModel):
         self.gsAccessMsgs = gs_access_msgs
         self.gsStateMsgs = gs_state_msgs
         self.selectedGsIdx: Optional[int] = None 
+        assert sun_eclipse_msg is not None
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
 

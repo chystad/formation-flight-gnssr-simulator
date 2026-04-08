@@ -1,10 +1,10 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 48 # [hours] 
+  simulationDuration: 1.5 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 1
+  num_satellites: 2
   sat_init_source: "oe" # [oe, vec]
 
 # Satellite parameters
@@ -103,6 +103,10 @@ SP_PARAMETERS:
     panel_area: 0.18      # [m^2] Panel area (> 0)
     panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
   p2:
+    nHat_B: [0, 1, 0]
+    panel_area: 0.02
+    panel_efficiency: 0.2
+  p3:
     nHat_B: [0, 0, -1]
     panel_area: 0.06
     panel_efficiency: 0.2

@@ -6,6 +6,7 @@ import matplotlib.colors as mcolors # only for debug
 from typing import Optional, Any, Union
 from numpy.typing import NDArray
 from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
 
 from Basilisk import __path__
 from Basilisk.architecture import messaging
@@ -13,6 +14,7 @@ from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, 
                                 exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, 
                                 svIntegrators, reactionWheelStateEffector,
                                 RWConfigPayload, groundLocation)
+from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower)
 from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simIncludeGravBody, 
                                 unitTestSupport, vizSupport, fswSetupRW, simIncludeRW)
 
@@ -30,6 +32,21 @@ PLT_WIDTH = 16.0
 EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
 GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
+
+
+# TODO: Instead of storing spacecraft specific parameters 
+#       in class attribute lists, store them in this per-spacecraft bundle
+@dataclass
+class SpacecraftRuntime:
+    scObj: spacecraft.Spacecraft
+    fsw: FswStack
+    rwFactory: simIncludeRW.rwFactory
+    rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector
+    battery: simpleBattery.SimpleBattery
+    solarPanels: list[simpleSolarPanel.SimpleSolarPanel]
+    rwPowerNodes: list[ReactionWheelPower.ReactionWheelPower]
+    powerSink: simplePowerSink.SimplePowerSink
+    recorders: Any # SatelliteRecorders
 
 
 class BasiliskSimulator:
@@ -124,7 +141,6 @@ class BasiliskSimulator:
 
         # Create a stable list of flight software stacks
         self.fswStacks: list[FswStack] = []
-        # self.rwEffectors: list = []
         self.rwFactories: list[simIncludeRW.rwFactory] = []
         self.fswRwParamMsgs: list[messaging.RWArrayConfigMsg] = []
 
@@ -225,6 +241,11 @@ class BasiliskSimulator:
         self.snTransRecorders: list = []
         self.mrpRecorders: list = []
         self.rwRecorders: list = []
+        # Power subsystem
+        self.allSpRecorders: list[list] = []
+        self.allRwPowRecorders: list[list] = []
+        self.psRecorders: list = []
+        self.batRecorders: list = []
 
         # get satellites from config
         satellites = self.cfg.satellites
@@ -265,60 +286,48 @@ class BasiliskSimulator:
             scObj.hub.sigma_BNInit = sat.init_att  # orientation of Body(B) relative to inertial(N) expressed using MRP
             scObj.hub.omega_BN_BInit = sat.init_angvel  # [rad/s] angular velocity of Body(B) relative to inertial(N) expressed in (B)
             
+            
+            # ==================== Orbital perturbations ==================== #
             # ---- Main graviational attraction, Spherical Harmonics and 3rd body perturbation ----
-            # The gravitational sources and models have already been defined gravFactory in accordance with cfg
             gravFactory.addBodiesTo(scObj)
             
-
             # ---- Drag effector ----
             scObj = self.conditional_drag_effector(sat, scObj, atm)
             
-            
             # ---- SRP effector ----
-            # Register this spacecraft with the eclipse model to get its own eclipse msg
-            scObj = self.conditional_srp_effector(sat, scObj, sunMsg, eclipseObj)
-            
+            scObj, sun_eclipse_msg = self.conditional_srp_effector(sat, scObj, sunMsg, eclipseObj)
 
+
+            
+            # ==================== Ground Locations & POIs ==================== #
+            # ---- Attach spacecraft to ground station(s) and prepair access msgs for fsw ---- 
+            scObj, gs_access_msgs = self.attach_ground_stations(scObj)
+
+
+
+            # ==================== Spacecraft components & Pointing FSW ==================== #
             # ---- Reaction Wheel State Effector ---- 
-            # Create RWs from config, create a RW effector and attach to the spacecraft
-            scObj, rwFactory, rwEffector = self.RW_effector(sat, scObj, i)
+            scObj, rwFactory, rwEffector = self.initialize_and_attach_RW_effector(sat, scObj, i)
 
-
-             # ---- Attach spacecraft to ground station(s) and prepair access msgs for fsw ---- 
-            gs_access_msgs: list[messaging.AccessMsg] = [] # will contain the access msg for this spacecraft against all ground stations
-            for j, gs in enumerate(self.groundStations):
-                gs.addSpacecraftToModel(scObj.scStateOutMsg)
-                gs_access_msgs.append(gs.accessOutMsgs[-1]) # -1 idx refers to the latest added sc (current iteration sat)
-
-            
-            # ----  Get the spacecraft-sun eclipse msg for fsw ---- 
-            assert eclipseObj is not None
-            sun_eclipse_msg: messaging.EclipseMsg = eclipseObj.eclipseOutMsgs[-1] 
-            # TODO: Using index '-1' assumes that no other SC have been added to the eclipse model since 'conditional_srp_effector'
-            #       This will never actually be a problem, but it might be fragile to assume this. 
-            #       Move this line inside 'conditional_srp_effector' or use satellite index instead. 
+            # ---- Solar panels ----
+            solarPanels = self.initialize_and_schedule_solar_panels(scObj, sunMsg, sun_eclipse_msg)
 
             # ---- Flight software ----
-            assert sunMsg is not None
-            fswRwParamMsg = rwFactory.getConfigMessage()
-            self.fswRwParamMsgs.append(fswRwParamMsg)
-            fsw = FswStack(
-                sat = sat,
-                sat_idx = i,
-                sc_state_out_msg = scObj.scStateOutMsg,
-                rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
-                rw_config_msg = fswRwParamMsg,
-                gs_access_msgs = gs_access_msgs,
-                gs_state_msgs = gs_state_msgs,
-                sun_eclipse_msg = sun_eclipse_msg,
-                sun_state_msg = sunMsg
-            )            
-            self.scSim.AddModelToTask(self.fswTaskName, fsw)
+            fsw = self.initialize_and_schedule_fsw(sat, i, scObj, rwFactory, rwEffector, gs_state_msgs, 
+                                                   gs_access_msgs, sunMsg, sun_eclipse_msg)
 
             # RW effector must know its commanded torque
             rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
 
 
+            
+            # ==================== Electronics ==================== #
+            # ---- Power subsystem ----
+            battery, rwPowerList, powerSink = self.initialize_and_schedule_power_subsystem(i, scObj, solarPanels, 
+                                                                                           rwFactory, rwEffector)
+            
+            
+            # ==================== Numerical Integration Method ==================== #
             # ---- Set object integration method ----
             scObj = self.conditional_object_integrator(scObj)
 
@@ -332,10 +341,27 @@ class BasiliskSimulator:
             attErrorLog = fsw.attGuidOutMsg.recorder(samplingTime)
             snTransLog = fsw.navTransOutMsg.recorder(samplingTime)
             mrpLog = rwEffector.rwSpeedOutMsg.recorder(samplingTime)
-            rwLogs: list = []
+            rwLogs: list = [] # RW recorders (one for each RW)
             for j in range(len(self.cfg.spinUVecs)):
                 rwLogs.append(rwEffector.rwOutMsgs[j].recorder(samplingTime))
                 self.scSim.AddModelToTask(self.simTaskName, rwLogs[j])
+
+            rwPowRecorders: list = [] # RW power recorders (one for eacg RW)
+            for rwPow in rwPowerList:
+                rwPowLog = rwPow.nodePowerOutMsg.recorder(samplingTime)
+                self.scSim.AddModelToTask(self.simTaskName, rwPowLog)
+                rwPowRecorders.append(rwPowLog)
+            
+            spRecorders: list = [] # Solar panel power out recorders (one for each panel)
+            for sp in solarPanels:
+                spLog = sp.nodePowerOutMsg.recorder(samplingTime)
+                self.scSim.AddModelToTask(self.simTaskName, spLog)
+                spRecorders.append(spLog)
+
+            psLog = powerSink.nodePowerOutMsg.recorder(samplingTime) # Power consumption from constant sink
+            batLog = battery.batPowerOutMsg.recorder(samplingTime) # Battery power 
+
+            
             # srpRec = self.make_srp_recorder(srp, samplingTime)  
 
             # Add recorder to the simulation process
@@ -345,12 +371,15 @@ class BasiliskSimulator:
             self.scSim.AddModelToTask(self.simTaskName, attErrorLog)
             self.scSim.AddModelToTask(self.simTaskName, snTransLog)
             self.scSim.AddModelToTask(self.simTaskName, mrpLog)
+            self.scSim.AddModelToTask(self.simTaskName, psLog) 
+            self.scSim.AddModelToTask(self.simTaskName, batLog)
             # self.scSim.AddModelToTask(self.simTaskName, srpRec)
                         
             # Append object and recorders to avvoid them getting CE'ed
             self.scObjects.append(scObj)
             self.fswStacks.append(fsw)
             self.rwFactories.append(rwFactory)
+            # self.fswRwParamMsgs.append(fswRwParamMsg)
 
             self.scRecorders.append(scRec)
             self.atmRecorders.append(atmLog)
@@ -359,6 +388,10 @@ class BasiliskSimulator:
             self.snTransRecorders.append(snTransLog)
             self.mrpRecorders.append(mrpLog)
             self.rwRecorders.append(rwLogs)
+            self.allSpRecorders.append(spRecorders)
+            self.allRwPowRecorders.append(rwPowRecorders)
+            self.psRecorders.append(psLog)
+            self.batRecorders.append(batLog)
             # self.srpRecorders.append(srpRec)       
 
 
@@ -457,50 +490,93 @@ class BasiliskSimulator:
 
 
         ############ RW and Pointing controll debug ############
-        sat_idx = 0
-        fileName = os.path.basename(os.path.splitext(__file__)[0])
-        # num_RWs = len(self.RWs)
-        num_RWs = len(self.cfg.spinUVecs)
+        # sat_idx = 0
+        # fileName = os.path.basename(os.path.splitext(__file__)[0])
+        # # num_RWs = len(self.RWs)
+        # num_RWs = len(self.cfg.spinUVecs)
 
-        dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
-        dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
-        dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
-        dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
+        # dataUsReq = self.rwMotorRecorders[sat_idx].motorTorque
+        # dataSigmaBR = self.attErrRecorders[sat_idx].sigma_BR
+        # dataOmegaBR = self.attErrRecorders[sat_idx].omega_BR_B
+        # dataOmegaRW = self.mrpRecorders[sat_idx].wheelSpeeds
 
-        dataRW = []
-        # for i, RW in enumerate(self.RWs):
-        for i in range(num_RWs):
-            dataRW.append(self.rwRecorders[sat_idx][i].u_current)
-        np.set_printoptions(precision=16)
+        # dataRW = []
+        # # for i, RW in enumerate(self.RWs):
+        # for i in range(num_RWs):
+        #     dataRW.append(self.rwRecorders[sat_idx][i].u_current)
+        # np.set_printoptions(precision=16)
 
-        #
-        #   plot the results
-        #
-        timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
-        plt.close("all")  # clears out plots from earlier test runs
+        # #
+        # #   plot the results
+        # #
+        # timeData = self.rwMotorRecorders[sat_idx].times() * macros.NANO2MIN
+        # plt.close("all")  # clears out plots from earlier test runs
 
-        self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
-        figureList = {}
-        pltName = fileName + "1"
-        figureList[pltName] = plt.figure(1)
+        # self._DEBUG_plot_attitude_error(timeData, dataSigmaBR)
+        # figureList = {}
+        # pltName = fileName + "1"
+        # figureList[pltName] = plt.figure(1)
 
-        self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
-        pltName = fileName + "2"
-        figureList[pltName] = plt.figure(2)
+        # self._DEBUG_plot_rw_motor_torque(timeData, dataUsReq, dataRW, num_RWs)
+        # pltName = fileName + "2"
+        # figureList[pltName] = plt.figure(2)
 
-        self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
-        self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
-        pltName = fileName + "3"
-        figureList[pltName] = plt.figure(4)
+        # self._DEBUG_plot_rate_error(timeData, dataOmegaBR)
+        # self._DEBUG_plot_rw_speeds(timeData, dataOmegaRW, num_RWs)
+        # pltName = fileName + "3"
+        # figureList[pltName] = plt.figure(4)
 
-        plt.show()
+        # plt.show()
 
-        # close the plots being saved off to avoid over-writing old and new figures
-        plt.close("all")
-
-
+        # # close the plots being saved off to avoid over-writing old and new figures
+        # plt.close("all")
         ########################################################
 
+
+        ############ Electrical subsystem plotting debug ############
+        sat_idx = 1 # Which satellite to plot data for
+        
+        # Gather all subsystems that generate power into 'supplyData' with a str identifier
+        supplyData: dict[str, Any] = {}
+        for i, spLog in enumerate(self.allSpRecorders[sat_idx]):
+            supplyData[f"Solar Panel #{i} (W)"] = spLog.netPower
+
+
+        # Gather all subsystems that consume power into 'sinkData' with a str identifier
+        sinkData: dict[str, Any] = {}
+        for i, rwPowLog in enumerate(self.allRwPowRecorders[sat_idx]):
+            sinkData[f"RW Power #{i} (W)"] = rwPowLog.netPower
+
+        sinkData["Const power sink (W)"] = self.psRecorders[sat_idx].netPower
+    
+        # Get battery data
+        batteryData = self.batRecorders[sat_idx].storageLevel
+        netData = self.batRecorders[sat_idx].currentNetPower
+
+        # Get time vector
+        timeData = self.batRecorders[sat_idx].times() * macros.NANO2HOUR
+        
+        self._DEBUG_plot_electrical_subsystem(
+            timeData,
+            supplyData,
+            sinkData,
+            batteryData,
+            netData
+        )
+        
+        #############################################################
+
+
+
+
+
+
+
+
+
+    ############################################################################################
+    # ==================================  HELPER FUNCTIONS  ================================== #
+    ############################################################################################
 
     def output_data(self) -> None:
         """
@@ -808,7 +884,8 @@ class BasiliskSimulator:
                                  sat: Satellite,
                                  scObj: spacecraft.Spacecraft,
                                  sunMsg: Optional[Any],
-                                 eclipseObj: Optional[eclipse.Eclipse]) -> spacecraft.Spacecraft:
+                                 eclipseObj: Optional[eclipse.Eclipse]
+                                 ) -> tuple[spacecraft.Spacecraft, Optional[messaging.EclipseMsg]]:
         """
         if the simulation is configured to use SRP, then define the SRP effector,
         mount it on the satellite object, and schedule it in the simulation task
@@ -829,10 +906,13 @@ class BasiliskSimulator:
 
         # Don't mount SRP effector on the spacecraft object if useSRP == False or any Optional inputs are None
         if (not self.cfg.useSRP) or (sunMsg is None) or (eclipseObj is None):
-            return scObj
+            return scObj, None
         
         # Register this spacecraft with the eclipse model to get its own eclipse msg
         eclipseObj.addSpacecraftToModel(scObj.scStateOutMsg)
+
+        # Capture this spacecraft's eclipse message immediately
+        sun_eclipse_msg: messaging.EclipseMsg = eclipseObj.eclipseOutMsgs[-1]
 
         # Define srp
         srp = radiationPressure.RadiationPressure()
@@ -850,7 +930,7 @@ class BasiliskSimulator:
 
         logging.debug("[BSK] Solar radiation pressure (SRP) model initialized")
 
-        return scObj
+        return scObj, sun_eclipse_msg
 
 
     def conditional_object_integrator(self, scObj: spacecraft.Spacecraft) -> spacecraft.Spacecraft:
@@ -876,9 +956,41 @@ class BasiliskSimulator:
         self.integrators.append(integratorObj)
 
         return scObj
+    
+
+    def initialize_and_schedule_solar_panels(self,
+                              scObj,
+                              sunMsg: Optional[messaging.SpicePlanetStateMsg],
+                              sun_eclipse_msg: Optional[messaging.EclipseMsg]
+                              ) -> list[simpleSolarPanel.SimpleSolarPanel]:
+        
+        assert sunMsg is not None
+        assert sun_eclipse_msg is not None
+
+        solar_panels = self.cfg.solar_panels
+        solarPanels: list[simpleSolarPanel.SimpleSolarPanel] = []
+
+        for i, sp in enumerate(solar_panels):
+            # Get attributes from SolarPanel instance
+            nHat_B = sp.nHat_B
+            panel_area = sp.panel_area
+            panel_efficiency = sp.panel_efficiency
+
+            # Generate solar panel module and schedule to task
+            solarPanel = simpleSolarPanel.SimpleSolarPanel()
+            solarPanel.ModelTag = f"{scObj.ModelTag}_sp{i}"
+            solarPanel.stateInMsg.subscribeTo(scObj.scStateOutMsg)
+            solarPanel.sunEclipseInMsg.subscribeTo(sun_eclipse_msg)
+            solarPanel.sunInMsg.subscribeTo(sunMsg)
+            solarPanel.setPanelParameters(nHat_B, panel_area, panel_efficiency)
+            self.scSim.AddModelToTask(self.simTaskName, solarPanel)
+
+            solarPanels.append(solarPanel)
+        
+        return solarPanels
 
 
-    def RW_effector(self, 
+    def initialize_and_attach_RW_effector(self, 
                     sat: Satellite, 
                     scObj: spacecraft.Spacecraft, 
                     i: int
@@ -973,6 +1085,150 @@ class BasiliskSimulator:
         self.scSim.AddModelToTask(self.simTaskName, rwEffector, 2)
         
         return scObj, rwFactory, rwEffector
+
+
+    def attach_ground_stations(self,
+                                     scObj: spacecraft.Spacecraft
+                                     ) -> tuple[spacecraft.Spacecraft, list[messaging.AccessMsg]]:
+        """
+        Attach current spacecraft to all ground station(s) and 
+        prepair their access messages for the flight software
+
+        Args:
+            scObj (Spacecraft): Current Basilisk Spacecraft instance
+
+        Returns:
+            Spacecraft: Current Basilisk Spacecraft instance with attached ground station
+            list[AccessMsg]: A list of access messages, one for each spacecraft-ground-station pair
+        """
+        # Attach spacecraft to ground station(s) and prepair access msgs for fsw 
+        gs_access_msgs: list[messaging.AccessMsg] = [] # will contain the access msg for this spacecraft against all ground stations
+        for j, gs in enumerate(self.groundStations):
+            gs.addSpacecraftToModel(scObj.scStateOutMsg)
+            gs_access_msgs.append(gs.accessOutMsgs[-1]) # -1 idx refers to the latest added sc (current iteration sat)
+
+        return scObj, gs_access_msgs
+    
+
+    def initialize_and_schedule_fsw(self,
+                                    sat: Satellite,
+                                    sat_idx: int,
+                                    scObj: spacecraft.Spacecraft,
+                                    rwFactory: simIncludeRW.rwFactory,
+                                    rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector,
+                                    gs_state_msgs: list[messaging.GroundStateMsg],
+                                    gs_access_msgs: list[messaging.AccessMsg],
+                                    sunMsg: Optional[messaging.SpicePlanetStateMsg],
+                                    sun_eclipse_msg: Optional[messaging.EclipseMsg]) -> FswStack:
+        """
+        Prepair missing messages, initialize the spacecraft flight software and schedule it.
+
+        Params:
+            sat (Satellite): current satellite instance in satellite loop
+            sat_idx (int): current satellite loop iteration
+            scObj (Spacecraft): Current spacecraft instance in satellite loop
+            rwFactory (rwFactory): The factory instance used to generate the satellite's RWs
+            rwEffector (ReactionWheelStateEffector): The RW state effector attached to the Spacecraft instance
+            gs_state_msgs (list[GroundStateMsg]): Contains the position vector of all ground stations
+            gs_access_msgs (list[AccessMsg]): Contains the LOS flag for all Spacecraft-ground-station pair(s)
+            sunMsg (SpicePlanetStateMsg): Contains the position vector from the Earth to the Sun
+            sun_eclipse_msg (EclipseMsg): Contais the fraction of illumination from the sun 
+
+        Returns:
+            FswStack: The flight software for the current spacecraft. It is is a scheduled sysModel that runs
+                during simulation execution and contains the satellite pointing guidance and control systems
+        """
+
+        assert sunMsg is not None
+        assert sun_eclipse_msg is not None
+
+        # Get RW configuration
+        fswRwParamMsg = rwFactory.getConfigMessage()
+        self.fswRwParamMsgs.append(fswRwParamMsg)
+
+        # Initialize flight software for the current Spacecraft
+        fsw = FswStack(
+            sat = sat,
+            sat_idx = sat_idx,
+            sc_state_out_msg = scObj.scStateOutMsg,
+            rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
+            rw_config_msg = fswRwParamMsg,
+            gs_access_msgs = gs_access_msgs,
+            gs_state_msgs = gs_state_msgs,
+            sun_eclipse_msg = sun_eclipse_msg,
+            sun_state_msg = sunMsg
+        )    
+
+        # Schedule model        
+        self.scSim.AddModelToTask(self.fswTaskName, fsw)
+
+        return fsw
+
+
+    def initialize_and_schedule_power_subsystem(self,
+                                                sat_idx: int,
+                                                scObj: spacecraft.Spacecraft,
+                                                solarPanels: list[simpleSolarPanel.SimpleSolarPanel],
+                                                rwFactory: simIncludeRW.rwFactory,
+                                                rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector
+                                                ) -> tuple[simpleBattery.SimpleBattery, 
+                                                           list[ReactionWheelPower.ReactionWheelPower], 
+                                                           simplePowerSink.SimplePowerSink]:
+        """
+        Initialize all power modules: battery, RW power consumption, constant power sink, solar panel charging
+
+        Args:
+            sat_idx (int): current satellite loop iteration
+            scObj (Spacecraft): Current spacecraft instance in satellite loop
+            solarPanels (list[SimpleSolarPanel]): All solar panels attached to the spacectaft
+            rwFactory (rwFactory): The factory instance used to generate the satellite's RWs
+            rwEffector (ReactionWheelStateEffector): The RW state effector attached to the Spacecraft instance
+
+        Returns:
+            SimpleBattery: The spacecraft's battery
+            list[ReactionWheelPower]: A list containing one RW power module for each of the spacecraft's RWs
+            SimplePowerSink: A constant power consumer representing the power draw from OBC and idle loads
+        """
+        
+        # Create a simpleBattery
+        battery = simpleBattery.SimpleBattery()
+        battery.ModelTag = f"battery_{sat_idx}"
+        battery.storageCapacity = 10.0 * 3600.0  # Convert from W-hr to Joules TODO realistic value
+        battery.storedCharge_Init = 10.0 * 3600.0  # Convert from W-Hr to Joules
+
+        
+        # Create RW power modules
+        rwPowerList: list[ReactionWheelPower.ReactionWheelPower] = []
+        numRWs = rwFactory.getNumOfDevices()
+        for j in range(numRWs):
+            powerRW = ReactionWheelPower.ReactionWheelPower()
+            powerRW.ModelTag = scObj.ModelTag + "RWPower" + str(j)
+            powerRW.basePowerNeed = 5.   # baseline power draw, Watts
+            powerRW.rwStateInMsg.subscribeTo(rwEffector.rwOutMsgs[j])
+            
+            if False: # TODO: Is it realistic for RWs to generate electricity on smallsats?
+                powerRW.mechToElecEfficiency = 0.5 # TODO: Realistic value
+            
+            self.scSim.AddModelToTask(self.simTaskName, powerRW)
+            rwPowerList.append(powerRW)
+
+        # TODO Simple power consumption [PLACEHOLDER for baseline draw like OBC etc]
+        powerSink = simplePowerSink.SimplePowerSink()
+        powerSink.ModelTag = f"powerSink_{sat_idx}"
+        powerSink.nodePowerOut = -3.  # TODO Watts
+        self.scSim.AddModelToTask(self.simTaskName, powerSink)
+
+        # Add all power sources/consumers to battery
+        for sp in solarPanels:
+            battery.addPowerNodeToModel(sp.nodePowerOutMsg)
+
+        for rwPow in rwPowerList:
+            battery.addPowerNodeToModel(rwPow.nodePowerOutMsg)
+        
+        battery.addPowerNodeToModel(powerSink.nodePowerOutMsg)
+        self.scSim.AddModelToTask(self.simTaskName, battery) 
+
+        return battery, rwPowerList, powerSink          
 
 
     @staticmethod
@@ -1190,3 +1446,30 @@ class BasiliskSimulator:
         plt.legend(loc='lower right')
         plt.xlabel('Time [min]')
         plt.ylabel('RW Speed (RPM) ')
+
+    @staticmethod
+    def _DEBUG_plot_electrical_subsystem(timeData, supplyData: dict, sinkData: dict, batteryData, netData):
+        # This pulls the actual data log from the simulation run.
+        # Note that range(3) will provide [0, 1, 2]  Those are the elements you get from the vector (all of them)
+
+        #   Plot the power states
+        figureList = {}
+        plt.close("all")  # clears out plots from earlier test runs
+        plt.figure(1)
+        plt.plot(timeData, batteryData/3600., label='Stored Power (W-Hr)')
+        plt.plot(timeData, netData, label='Net Power (W)')        
+        for id, data in supplyData.items():
+            plt.plot(timeData, data, label=id)
+        for id, data in sinkData.items():
+            plt.plot(timeData, data, label=id)
+        plt.xlabel('Time (Hr)')
+        plt.ylabel('Power (W)')
+        plt.grid(True)
+        plt.legend()
+
+        pltName = "scenario_powerDemo"
+        figureList[pltName] = plt.figure(1)
+
+        plt.show()
+
+        plt.close("all")
