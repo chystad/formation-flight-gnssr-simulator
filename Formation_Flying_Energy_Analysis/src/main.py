@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
 
 # TODO
-"""
+""" 
 * [IMPORTANT] Don't use cannonball SRP and Drag effector. This makes them attitude independent!
 * Enable the option to queue multiple simulation runs with different configurations
 * Solar panel feature:

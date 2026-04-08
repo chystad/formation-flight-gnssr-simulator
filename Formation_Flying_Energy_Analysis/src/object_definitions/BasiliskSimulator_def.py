@@ -43,8 +43,8 @@ class SpacecraftRuntime:
     rwFactory: simIncludeRW.rwFactory
     rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector
     battery: simpleBattery.SimpleBattery
-    solarPanels: list[simpleSolarPanel.SimpleSolarPanel]
-    rwPowerNodes: list[ReactionWheelPower.ReactionWheelPower]
+    solarPanels: list[simpleSolarPanel.SimpleSolarPanel] 
+    rwPowerNodes: list[ReactionWheelPower.ReactionWheelPower] 
     powerSink: simplePowerSink.SimplePowerSink
     recorders: Any # SatelliteRecorders
 

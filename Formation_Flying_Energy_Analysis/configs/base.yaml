@@ -2,7 +2,7 @@
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
   simulationDuration: 1.5 # [hours] 
-  deltaT: 0.5 # [sec] Solver max time step
+  deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 2
   sat_init_source: "oe" # [oe, vec]

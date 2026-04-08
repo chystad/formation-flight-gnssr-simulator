@@ -43,7 +43,7 @@ class FswStack(sysModel.SysModel):
         - rwMotorTorqueOutMsg 
         - attGuidOutMsg         
         - cmdTorqueOutMsg  
-        - navAttOutMsg / navTransOutMsg
+        - navAttOutMsg / navTransOutMsg 
 
     =========================================================================================================
     ATTRIBUTES:
