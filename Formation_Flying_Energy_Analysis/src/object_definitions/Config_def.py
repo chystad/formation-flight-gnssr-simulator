@@ -6,10 +6,7 @@ from pathlib import Path
 from numpy.typing import NDArray
 from pathlib import Path
 from datetime import datetime
-from dataclasses import dataclass
-from dataclasses_json import dataclass_json
 
-# from object_definitions.TLE_def import TLE
 from object_definitions.Satellite_def import Satellite
 from object_definitions.GroundStation_def import GroundStation
 from object_definitions.SolarPanel_def import SolarPanel
@@ -47,10 +44,10 @@ class Config:
             s_set (SkyfieldSettings):       SkyfieldSettings instance describing the Skyfield simulation settings     
         =========================================================================================================
         """
-        ####################
-        # Load cofig files #
-        ####################
-        d_cfg = self.read(config_file_path)                 # default config
+        ###################
+        # Load cofig file #
+        ###################
+        d_cfg = self.read(config_file_path) # default config
         
         ##################################################
         # Fetch global simulation parameters config file #
@@ -61,9 +58,15 @@ class Config:
         integrator =            str(    d_cfg['SIMULATION']['integrator'])
         num_satellites =        int(    d_cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    d_cfg['SIMULATION']['sat_init_source'])
-        all_sat_params =        d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
-        all_gs_params =         d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
-        all_sp_params =         d_cfg['SP_PARAMETERS'] # dict [str, dict[str, Any]]   
+        all_sat_params =                d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
+        all_gs_params =                 d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
+
+        # Electrical power system parameters (same for all satellites)
+        bat_storage_capacity =  float(  d_cfg['EPS_PARAMETERS']['bat_storage_capacity'])
+        init_bat_charge =       float(  d_cfg['EPS_PARAMETERS']['init_bat_charge'])
+        RW_base_draw =          float(  d_cfg['EPS_PARAMETERS']['RW_base_draw'])
+        OBC_const_draw =        float(  d_cfg['EPS_PARAMETERS']['OBC_const_draw'])
+        all_sp_params =                 d_cfg['EPS_PARAMETERS']['solar_panels'] # dict[str, dict[str, Any]]  
 
         # Reaction wheel parameters (same for all satellites)
         RW_model =              str(    d_cfg['RW_PARAMETERS']['RW_model'])
@@ -105,49 +108,34 @@ class Config:
         ################################################################
         # Perform checks to ensure parameters are received as expected #
         ################################################################
-        # --- Verify RW_model input ---
-        if isinstance(RW_model, str):
-            if not ((RW_model == "BalancedWheels") or (RW_model == "JitterSimple") or (RW_model == "JitterFullyCoupled")):
-                raise ValueError(f"Unexpected value given for 'RW_model'. "
-                                 f"Got '{RW_model}', expected ['BalancedWheels', 'JitterSimple', 'JitterFullyCoupled'])")
-        else: 
-            raise ValueError(f"Unexpected type given for 'RW_model'. "
-                             f"Got '{type(RW_model)}', expected 'str'")
-        
-        # --- Verify spinUVecs input ---
-        if isinstance(spinUVecs, list):
-            num_RWs = len(spinUVecs)
-            if num_RWs == 0:
-                raise ValueError(f"No RW unit vectors defined in 'spinUVecs'")
-            
-            for i, spin_uvec in enumerate(spinUVecs):
-                if len(spin_uvec) != 3:
-                    raise ValueError(f"RW spin unit vector nr. {i} has {len(spin_uvec)} elements, expected 3")
-                v = np.array(spin_uvec)
-                norm = np.linalg.norm(v)
-                if not np.isclose(norm, 1.0):
-                    raise ValueError(f"RW spin vector nr. {i} is not of unit length. (given length: {norm})")
-        else:
-            raise ValueError(f"Unexpected type given for 'spinUVecs'. "
-                             f"Got '{type(spinUVecs)}', expected 'list[list[float]]'")
+       
+        # Validate RW parameters
+        self.validate_rw_parameters(
+            RW_model, 
+            spinUVecs
+        )
 
-        # --- Verify RW friction parameters ---
-
-        #TODO: Other received parameters
+        # Validate EPS parameters (except solar panel parameters. These are validated in 'generate_solar_panel_instances_from_config')
+        self.validate_eps_parameters(
+            bat_storage_capacity,
+            init_bat_charge,
+            RW_base_draw,
+            OBC_const_draw
+        )
         
-        
-        # Create Satellite intstances
+        # Validate satellite parameters and create 'Satellite' intstances
         satellites = self.generate_satellite_instances_from_config(
             all_sat_params, 
             num_satellites,
             sat_init_source
         )
 
+        # Validate solar panel parameters and create 'SolarPanel' instances
         solar_panels = self.generate_solar_panel_instances_from_config(
             all_sp_params
         )
 
-        # Create GroundStation instances
+        # Validate ground station parameters and create 'GroundStation' instances
         ground_stations = self.generate_ground_station_instances_from_config(
             all_gs_params
         )
@@ -170,7 +158,11 @@ class Config:
         # Ground stattions
         self.ground_stations: list[GroundStation] = ground_stations
 
-        # Solar panel parameters
+        # EPS parameters
+        self.bat_storage_capacity: float = bat_storage_capacity
+        self.init_bat_charge: float = init_bat_charge
+        self.RW_base_draw: float = RW_base_draw
+        self.OBC_const_draw: float = OBC_const_draw
         self.solar_panels: list[SolarPanel] = solar_panels
 
         # RW parameters
@@ -257,7 +249,7 @@ class Config:
                                                  num_satellites: int,
                                                  sat_init_source: str) -> list[Satellite]:
         """
-        Generates a list of Satellite objects that store all the satellite parameters.
+        Validate all satellite parameters and generate a list of Satellite objects that store all the satellite parameters.
         The number of satellites are defined by 'num_satellites' in base.yaml, 
         and the individual satellite parameters are defined in the fields under 'leader', 'follower-1', 'follower-2', etc.
 
@@ -458,6 +450,17 @@ class Config:
     def generate_ground_station_instances_from_config(self, 
                                                       all_gs_params: dict[str, dict[str, float]]
                                                       ) -> list[GroundStation]:
+        """
+        For each ground station in GROUND_STATIONS, validate parameters and create a GroundStation instance
+        Append all GroundStation instances to a list and return. 
+        Raise ValueError if incorrect type/value is detected.
+
+        Args:
+            all_gs_params (dict[str, dict[str, float]]): A dictionary loaded from config containing parameters for all ground stations
+
+        Returns:
+            list[GroundStation]: A list containing one GroundStation instance for each ground station described in config
+        """
 
         # Loop through all ground stations in all_gs_params
         ground_stations: list[GroundStation] = []
@@ -546,10 +549,21 @@ class Config:
         return ground_stations
 
 
-
     def generate_solar_panel_instances_from_config(self, 
                                                    all_sp_params: dict[str, dict[str, float]]
                                                    ) -> list[SolarPanel]:
+        """
+        Validate all solar panel parameters and generate one SolarPanel instance for each solar panel
+        defined in 'EPS_PARAMETERS/solar_panels'
+
+        Args:
+            all_sp_params (dict[str, dict[str, float]]): Dictionary loaded from config 
+                containing panel parameters for each solar panel
+        
+        Returns:
+            list[SolarPanel]: A list containing one SolarPanel instance 
+                for each solar panel defined in 'EPS_PARAMETERS/solar_panels'
+        """
         
         # Loop through all solar panels in all_sp_params
         solar_panels: list[SolarPanel] = []
@@ -615,3 +629,84 @@ class Config:
             solar_panels.append(solar_panel)
 
         return solar_panels               
+
+
+    def validate_rw_parameters(self,
+                               RW_model,
+                               spinUVecs,
+                               ) -> None:
+        """
+        Validate all RW parameter inputs to ensure correct type and value.
+        Raise ValueError if incorrect type or value is detected
+        TODO: init_rpm
+        TODO: max_rpm
+        TODO: maxMomentum
+        TODO: maxTorque
+        TODO: minTorque
+        TODO: useMinTorque
+        TODO: useFriction
+        TODO: fCoulomb
+        TODO: fStatic
+        TODO: betaStatic
+        TODO: cViscous
+        """
+        # ============ Check 'RW_model' is type str and is an acceptable string
+        if isinstance(RW_model, str):
+            if not ((RW_model == "BalancedWheels") or (RW_model == "JitterSimple") or (RW_model == "JitterFullyCoupled")):
+                raise ValueError(f"Unexpected value given for 'RW_model'. "
+                                 f"Got '{RW_model}', expected ['BalancedWheels', 'JitterSimple', 'JitterFullyCoupled'])")
+        else: 
+            raise ValueError(f"Unexpected type given for 'RW_model'. "
+                             f"Got '{type(RW_model)}', expected 'str'")
+        
+        # ============ Check 'spinUVecs' is a list of >0 lists, each internal list has 3 elements with norm==1
+        if isinstance(spinUVecs, list):
+            num_RWs = len(spinUVecs)
+            if num_RWs == 0:
+                raise ValueError(f"No RW unit vectors defined in 'spinUVecs'")
+            
+            for i, spin_uvec in enumerate(spinUVecs):
+                if len(spin_uvec) != 3:
+                    raise ValueError(f"RW spin unit vector nr. {i} has {len(spin_uvec)} elements, expected 3")
+                v = np.array(spin_uvec)
+                norm = np.linalg.norm(v)
+                if not np.isclose(norm, 1.0):
+                    raise ValueError(f"RW spin vector nr. {i} is not of unit length. (given length: {norm})")
+        else:
+            raise ValueError(f"Unexpected type given for 'spinUVecs'. "
+                             f"Got '{type(spinUVecs)}', expected 'list[list[float]]'")
+        
+    
+    def validate_eps_parameters(self,
+                                bat_storage_capacity: float,
+                                init_bat_charge: float,
+                                RW_base_draw: float,
+                                OBC_const_draw: float) -> None:
+        """
+        Validate all EPS parameter inputs to ensure correct type and value. 
+        Raise ValueError if incorrect type or value is detected
+        """
+        
+        # ============ Check if 'bat_storage_capacity' is of type float and has value >= 0
+        if not isinstance(bat_storage_capacity, float):
+            raise ValueError(f"Expected EPS parameter 'bat_storage_capacity' of type 'float'. Got: {type(bat_storage_capacity)}")
+        if bat_storage_capacity < 0:
+            raise ValueError(f"Expected EPS parameter 'bat_storage_capacity' to be bigger or equal to 0. Got: {bat_storage_capacity}")
+        
+        # ============ Check if 'init_bat_charge' is of type float and has value in range (0, 1)
+        if not isinstance(init_bat_charge, float):
+            raise ValueError(f"Expected EPS parameter 'init_bat_charge' of type 'float'. Got: {type(init_bat_charge)}")
+        if (init_bat_charge < 0) or (init_bat_charge > 1):
+            raise ValueError(f"Expected EPS parameter 'init_bat_charge' to be in range [0, 1]. Got: {init_bat_charge}")
+        
+        # ============ Check if 'RW_base_draw' is of type float and has value >= 0
+        if not isinstance(RW_base_draw, float):
+            raise ValueError(f"Expected EPS parameter 'RW_base_draw' of type 'float'. Got: {type(RW_base_draw)}")
+        if bat_storage_capacity < 0:
+            raise ValueError(f"Expected EPS parameter 'RW_base_draw' to be bigger or equal to 0. Got: {RW_base_draw}")
+        
+        # ============ Check if 'OBC_const_draw' is of type float and has value >= 0
+        if not isinstance(OBC_const_draw, float):
+            raise ValueError(f"Expected EPS parameter 'OBC_const_draw' of type 'float'. Got: {type(OBC_const_draw)}")
+        if OBC_const_draw < 0:
+            raise ValueError(f"Expected EPS parameter 'OBC_const_draw' to be bigger or equal to 0. Got: {OBC_const_draw}")

@@ -1,7 +1,7 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 1.5 # [hours] 
+  simulationDuration: 1 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 2
@@ -18,8 +18,8 @@ SATELLITES:
     I_B: [0.06666667, 0.,         0.,        
           0.,         0.08666667, 0.,
           0.,         0.,         0.03333333] # [kgm^2] Inertia of hub about point Bc in B frame components
-    r_BP_B: [0, 0, 1] # Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
-    r_BA_B: [0, 1, 0] # Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
+    r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
+    r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
     init_OEs:
       a: 6798.        # [km]  Semi-major axis
       e: 0.004161     # [-]   Eccentricity
@@ -96,21 +96,25 @@ GROUND_STATIONS:
     min_elev: 5
     max_range: -1
 
-# Solar Panel parameters (same for all satellites)
-SP_PARAMETERS:
-  p1:
-    nHat_B: [0, 0, 1]     # Panel normal unit vec in body (B)
-    panel_area: 0.18      # [m^2] Panel area (> 0)
-    panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
-  p2:
-    nHat_B: [0, 1, 0]
-    panel_area: 0.02
-    panel_efficiency: 0.2
-  p3:
-    nHat_B: [0, 0, -1]
-    panel_area: 0.06
-    panel_efficiency: 0.2
-
+# Electrical Power System parameters (same for all satellites) 
+EPS_PARAMETERS:
+  bat_storage_capacity: 5.0   # [Wh] Battery max storage capacity
+  init_bat_charge: 0.8        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
+  RW_base_draw: 5.0           # [W] Idle/baseline power consumption for each RW (> 0)
+  OBC_const_draw: 3.0         # [W] Constant OBC power consumption (> 0)
+  solar_panels:
+    p1:
+      nHat_B: [0, 0, 1]     # Panel normal unit vec in body (B)
+      panel_area: 0.18      # [m^2] Panel area (> 0)
+      panel_efficiency: 0.1 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
+    p2:
+      nHat_B: [0, 1, 0]
+      panel_area: 0.02
+      panel_efficiency: 0.1
+    p3:
+      nHat_B: [0, 0, -1]
+      panel_area: 0.06
+      panel_efficiency: 0.1
 
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
