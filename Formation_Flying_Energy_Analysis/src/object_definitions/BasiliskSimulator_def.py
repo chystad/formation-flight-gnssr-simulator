@@ -195,7 +195,7 @@ class BasiliskSimulator:
         ######################################################
         # Initialize Eclipse Model (Earth eclipsing the Sun) #
         ######################################################
-        sunMsg, eclipseObj = self.conditional_eclipse_init(spiceObj)
+        sun_msg, eclipseObj = self.conditional_eclipse_init(spiceObj)
 
 
         ##############################################
@@ -295,38 +295,35 @@ class BasiliskSimulator:
             scObj = self.setup_drag_effector(sat, scObj, atm)
             
             # ---- SRP effector ----
-            scObj, sun_eclipse_msg = self.setup_srp_effector(sat, scObj, sunMsg, eclipseObj)
+            scObj, sun_eclipse_msg = self.setup_srp_effector(sat, scObj, sun_msg, eclipseObj)
 
 
             
             # ==================== Ground Locations & POIs ==================== #
             # ---- Attach spacecraft to ground station(s) and prepair access msgs for fsw ---- 
-            scObj, gs_access_msgs = self.setup_ground_stations(scObj)
+            gs_access_msgs = self.setup_ground_stations(scObj)
 
 
 
             # ==================== Spacecraft components & Pointing FSW ==================== #
             # ---- Solar panels ----
-            solarPanels = self.setup_solar_panels(scObj, sunMsg, sun_eclipse_msg)
+            solarPanels = self.setup_solar_panels(scObj, sun_msg, sun_eclipse_msg)
             
             # ---- Reaction Wheel State Effector ---- 
             scObj, rwFactory, rwEffector = self.setup_RW_effector(sat, scObj, i)
 
+            # ---- Electronic Power System ----
+            battery, rwPowerList, powerSink = self.setup_eps(scObj, solarPanels, rwFactory, rwEffector)
+            
             # ---- Flight software ----
-            fsw = self.setup_fsw(sat, i, scObj, rwFactory, rwEffector, gs_state_msgs, 
-                                                   gs_access_msgs, sunMsg, sun_eclipse_msg)
+            fsw = self.setup_fsw(sat, i, scObj, rwFactory, rwEffector, battery, 
+                                 gs_state_msgs, gs_access_msgs, sun_msg, sun_eclipse_msg)
 
             # RW effector must know its commanded torque
             rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
+            
+            
 
-
-            
-            # ==================== Electronic Power System ==================== #
-            # ---- Power subsystem ----
-            battery, rwPowerList, powerSink = self.setup_eps(i, scObj, solarPanels, 
-                                                             rwFactory, rwEffector)
-            
-            
             # ==================== Numerical Integration Method ==================== #
             # ---- Set object integration method ----
             scObj = self.setup_spacecraft_integrator(scObj)
@@ -341,6 +338,7 @@ class BasiliskSimulator:
             attErrorLog = fsw.attGuidOutMsg.recorder(samplingTime)
             snTransLog = fsw.navTransOutMsg.recorder(samplingTime)
             mrpLog = rwEffector.rwSpeedOutMsg.recorder(samplingTime)
+            
             rwLogs: list = [] # RW recorders (one for each RW)
             for j in range(len(self.cfg.spinUVecs)):
                 rwLogs.append(rwEffector.rwOutMsgs[j].recorder(samplingTime))
@@ -592,7 +590,9 @@ class BasiliskSimulator:
         self.sim_data.write_data_to_file(self.cfg.timestamp_str, "bsk")
 
 
-    def conditional_planet_gravity_generation(self) -> tuple[simIncludeGravBody.gravBodyFactory, spiceInterface.SpiceInterface]:
+    def conditional_planet_gravity_generation(self
+                                              ) -> tuple[simIncludeGravBody.gravBodyFactory, 
+                                                         spiceInterface.SpiceInterface]:
         """
         Initialize a gravBodyFactory and SPICE interface. 
         Always generate the Earth and Sun, but disable the Sun's gravity if useSun3rdBody == False. 
@@ -662,8 +662,8 @@ class BasiliskSimulator:
 
     
     def conditional_eclipse_init(self, 
-                             spiceObj: spiceInterface.SpiceInterface
-                             ) -> tuple[Optional[messaging.SpicePlanetStateMsg], Optional[eclipse.Eclipse]]:
+                                 spiceObj: spiceInterface.SpiceInterface
+                                 ) -> tuple[Optional[messaging.SpicePlanetStateMsg], Optional[eclipse.Eclipse]]:
         """
         Initializes an eclipse model
         
@@ -682,11 +682,11 @@ class BasiliskSimulator:
         # The Earth and Sun will always have index [0] and [1] because gravFactory always creates Earth first, then Sun.
         # See 'conditional_planet_gravity_generation()' func for logic. 
         earthMsg = spiceObj.planetStateOutMsgs[0]
-        sunMsg   = spiceObj.planetStateOutMsgs[1]
+        sun_msg   = spiceObj.planetStateOutMsgs[1]
 
         # Initialize eclipse mode (when the Earth eclipses the Sun)
         eclipseObj = eclipse.Eclipse()
-        eclipseObj.sunInMsg.subscribeTo(sunMsg)
+        eclipseObj.sunInMsg.subscribeTo(sun_msg)
         eclipseObj.addPlanetToModel(earthMsg) # Earth occluder
         
         # Schedule object to simualtion process
@@ -697,12 +697,12 @@ class BasiliskSimulator:
 
         ####### FOR DEBUG ###############################
         # earthMsg = spiceObj.planetStateOutMsgs[0]
-        # sunMsg   = spiceObj.planetStateOutMsgs[1]
+        # sun_msg   = spiceObj.planetStateOutMsgs[1]
         # try:
         #     moonMsg = spiceObj.planetStateOutMsgs[2]
         # except:
         #     logging.debug("[BSK] The Moon gravitational entity is not defined in the SPICE interface")
-        # self.sunRec = sunMsg.recorder(samplingTime)
+        # self.sunRec = sun_msg.recorder(samplingTime)
         # self.earthRec = earthMsg.recorder(samplingTime)
         # try:
         #     self.moonRec = moonMsg.recorder(samplingTime) # type: ignore
@@ -713,10 +713,12 @@ class BasiliskSimulator:
         # if self.moonRec is not None: self.scSim.AddModelToTask(self.simTaskName, self.moonRec)
         #################################################
 
-        return sunMsg, eclipseObj
+        return sun_msg, eclipseObj
 
 
-    def conditional_atmosphere_init(self) -> Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, msisAtmosphere.MsisAtmosphere]]:
+    def conditional_atmosphere_init(self
+                                    ) -> Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, 
+                                                        msisAtmosphere.MsisAtmosphere]]:
         """
         Initialize and schedula an atmosphere model if it has been configured to do so by the config file:
 
@@ -817,10 +819,10 @@ class BasiliskSimulator:
     
 
     def setup_drag_effector(self, 
-                                  sat: Satellite,
-                                  scObj: spacecraft.Spacecraft,
-                                  atm: Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, msisAtmosphere.MsisAtmosphere]]
-                                 ) -> spacecraft.Spacecraft:
+                            sat: Satellite,
+                            scObj: spacecraft.Spacecraft,
+                            atm: Optional[Union[exponentialAtmosphere.ExponentialAtmosphere, msisAtmosphere.MsisAtmosphere]]
+                            ) -> spacecraft.Spacecraft:
         """
         if the simulation is configured to use exponential density drag, then define the drag effector,
         mount it on the satellite object, and schedule it in the simulation task
@@ -880,11 +882,12 @@ class BasiliskSimulator:
             
 
     def setup_srp_effector(self, 
-                                 sat: Satellite,
-                                 scObj: spacecraft.Spacecraft,
-                                 sunMsg: Optional[Any],
-                                 eclipseObj: Optional[eclipse.Eclipse]
-                                 ) -> tuple[spacecraft.Spacecraft, Optional[messaging.EclipseMsg]]:
+                           sat: Satellite,
+                           scObj: spacecraft.Spacecraft,
+                           sun_msg: Optional[Any],
+                           eclipseObj: Optional[eclipse.Eclipse]
+                           ) -> tuple[spacecraft.Spacecraft, 
+                                      Optional[messaging.EclipseMsg]]:
         """
         if the simulation is configured to use SRP, then define the SRP effector,
         mount it on the satellite object, and schedule it in the simulation task
@@ -894,8 +897,8 @@ class BasiliskSimulator:
         :type sat: Satellite
         :param scObj: The corresponding Basilisk spacecraft object in the cuurent iteration
         :type scObj: spacecraft.Spacecraft
-        :param sunMsg: The Sun's position or None
-        :type sunMsg: Optional[Any]
+        :param sun_msg: The Sun's position or None
+        :type sun_msg: Optional[Any]
         :param eclipseObj: Eclipse model
         :type eclipseObj: Optional[eclipse.Eclipse]
         :return: Unmodified scObj if useSRP == false.
@@ -904,7 +907,7 @@ class BasiliskSimulator:
         """
 
         # Don't mount SRP effector on the spacecraft object if useSRP == False or any Optional inputs are None
-        if (not self.cfg.useSRP) or (sunMsg is None) or (eclipseObj is None):
+        if (not self.cfg.useSRP) or (sun_msg is None) or (eclipseObj is None):
             return scObj, None
         
         # Register this spacecraft with the eclipse model to get its own eclipse msg
@@ -920,8 +923,8 @@ class BasiliskSimulator:
         srp.area = sat.A_srp # getattr(sat, "A_srp", 0.06)  
 
         # Subscribe to Sun ephemeris + this spacecraft’s eclipse factor
-        srp.sunEphmInMsg.subscribeTo(sunMsg)
-        srp.sunEclipseInMsg.subscribeTo(eclipseObj.eclipseOutMsgs[-1])  # last added = this SC
+        srp.sunEphmInMsg.subscribeTo(sun_msg)
+        srp.sunEclipseInMsg.subscribeTo(sun_eclipse_msg)
 
         # Mount SRP onto the spacecraft and schedule it
         scObj.addDynamicEffector(srp)
@@ -933,8 +936,8 @@ class BasiliskSimulator:
     
 
     def setup_ground_stations(self,
-                                     scObj: spacecraft.Spacecraft
-                                     ) -> tuple[spacecraft.Spacecraft, list[messaging.AccessMsg]]:
+                              scObj: spacecraft.Spacecraft
+                              ) -> list[messaging.AccessMsg]:
         """
         Attach current spacecraft to all ground station(s) and 
         prepair their access messages for the flight software
@@ -952,16 +955,16 @@ class BasiliskSimulator:
             gs.addSpacecraftToModel(scObj.scStateOutMsg)
             gs_access_msgs.append(gs.accessOutMsgs[-1]) # -1 idx refers to the latest added sc (current iteration sat)
 
-        return scObj, gs_access_msgs
+        return gs_access_msgs
 
 
     def setup_solar_panels(self,
-                              scObj,
-                              sunMsg: Optional[messaging.SpicePlanetStateMsg],
-                              sun_eclipse_msg: Optional[messaging.EclipseMsg]
-                              ) -> list[simpleSolarPanel.SimpleSolarPanel]:
+                           scObj,
+                           sun_msg: Optional[messaging.SpicePlanetStateMsg],
+                           sun_eclipse_msg: Optional[messaging.EclipseMsg]
+                           ) -> list[simpleSolarPanel.SimpleSolarPanel]:
         
-        assert sunMsg is not None
+        assert sun_msg is not None
         assert sun_eclipse_msg is not None
 
         solar_panels = self.cfg.solar_panels
@@ -978,7 +981,7 @@ class BasiliskSimulator:
             solarPanel.ModelTag = f"{scObj.ModelTag}_sp{i}"
             solarPanel.stateInMsg.subscribeTo(scObj.scStateOutMsg)
             solarPanel.sunEclipseInMsg.subscribeTo(sun_eclipse_msg)
-            solarPanel.sunInMsg.subscribeTo(sunMsg)
+            solarPanel.sunInMsg.subscribeTo(sun_msg)
             solarPanel.setPanelParameters(nHat_B, panel_area, panel_efficiency)
             self.scSim.AddModelToTask(self.simTaskName, solarPanel)
 
@@ -988,12 +991,12 @@ class BasiliskSimulator:
 
 
     def setup_RW_effector(self, 
-                    sat: Satellite, 
-                    scObj: spacecraft.Spacecraft, 
-                    i: int
-        ) -> tuple[spacecraft.Spacecraft, 
-                   simIncludeRW.rwFactory, 
-                   reactionWheelStateEffector.ReactionWheelStateEffector]:
+                          sat: Satellite, 
+                          scObj: spacecraft.Spacecraft, 
+                          i: int
+                          ) -> tuple[spacecraft.Spacecraft, 
+                                     simIncludeRW.rwFactory, 
+                                     reactionWheelStateEffector.ReactionWheelStateEffector]:
         """
         Generate reaction wheel object(s) using the config parameters, create the RW state effector, 
         add it to the spacecraft and schedule it in the simulation task. 
@@ -1085,15 +1088,17 @@ class BasiliskSimulator:
 
 
     def setup_fsw(self,
-                                    sat: Satellite,
-                                    sat_idx: int,
-                                    scObj: spacecraft.Spacecraft,
-                                    rwFactory: simIncludeRW.rwFactory,
-                                    rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector,
-                                    gs_state_msgs: list[messaging.GroundStateMsg],
-                                    gs_access_msgs: list[messaging.AccessMsg],
-                                    sunMsg: Optional[messaging.SpicePlanetStateMsg],
-                                    sun_eclipse_msg: Optional[messaging.EclipseMsg]) -> FswStack:
+                  sat: Satellite,
+                  sat_idx: int,
+                  scObj: spacecraft.Spacecraft,
+                  rwFactory: simIncludeRW.rwFactory,
+                  rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector,
+                  battery: simpleBattery.SimpleBattery,
+                  gs_state_msgs: list[messaging.GroundStateMsg],
+                  gs_access_msgs: list[messaging.AccessMsg],
+                  sun_msg: Optional[messaging.SpicePlanetStateMsg],
+                  sun_eclipse_msg: Optional[messaging.EclipseMsg]
+                  ) -> FswStack:
         """
         Prepair missing messages, initialize the spacecraft flight software and schedule it.
 
@@ -1105,7 +1110,7 @@ class BasiliskSimulator:
             rwEffector (ReactionWheelStateEffector): The RW state effector attached to the Spacecraft instance
             gs_state_msgs (list[GroundStateMsg]): Contains the position vector of all ground stations
             gs_access_msgs (list[AccessMsg]): Contains the LOS flag for all Spacecraft-ground-station pair(s)
-            sunMsg (SpicePlanetStateMsg): Contains the position vector from the Earth to the Sun
+            sun_msg (SpicePlanetStateMsg): Contains the position vector from the Earth to the Sun
             sun_eclipse_msg (EclipseMsg): Contais the fraction of illumination from the sun 
 
         Returns:
@@ -1113,12 +1118,12 @@ class BasiliskSimulator:
                 during simulation execution and contains the satellite pointing guidance and control systems
         """
 
-        assert sunMsg is not None
+        assert sun_msg is not None
         assert sun_eclipse_msg is not None
 
         # Get RW configuration
         fswRwParamMsg = rwFactory.getConfigMessage()
-        self.fswRwParamMsgs.append(fswRwParamMsg)
+        self.fswRwParamMsgs.append(fswRwParamMsg) # To prevent it from being CE'd
 
         # Initialize flight software for the current Spacecraft
         fsw = FswStack(
@@ -1127,10 +1132,12 @@ class BasiliskSimulator:
             sc_state_out_msg = scObj.scStateOutMsg,
             rw_speed_out_msg = rwEffector.rwSpeedOutMsg,
             rw_config_msg = fswRwParamMsg,
+            bat_state_msg = battery.batPowerOutMsg,
             gs_access_msgs = gs_access_msgs,
             gs_state_msgs = gs_state_msgs,
             sun_eclipse_msg = sun_eclipse_msg,
-            sun_state_msg = sunMsg
+            sun_state_msg = sun_msg,
+            log_timestamp = self.cfg.timestamp_str
         )    
 
         # Schedule model        
@@ -1140,14 +1147,13 @@ class BasiliskSimulator:
 
 
     def setup_eps(self,
-                                                sat_idx: int,
-                                                scObj: spacecraft.Spacecraft,
-                                                solarPanels: list[simpleSolarPanel.SimpleSolarPanel],
-                                                rwFactory: simIncludeRW.rwFactory,
-                                                rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector
-                                                ) -> tuple[simpleBattery.SimpleBattery, 
-                                                           list[ReactionWheelPower.ReactionWheelPower], 
-                                                           simplePowerSink.SimplePowerSink]:
+                  scObj: spacecraft.Spacecraft,
+                  solarPanels: list[simpleSolarPanel.SimpleSolarPanel],
+                  rwFactory: simIncludeRW.rwFactory,
+                  rwEffector: reactionWheelStateEffector.ReactionWheelStateEffector
+                  ) -> tuple[simpleBattery.SimpleBattery, 
+                              list[ReactionWheelPower.ReactionWheelPower], 
+                              simplePowerSink.SimplePowerSink]:
         """
         Initialize all power modules: battery, RW power consumption, constant power sink, solar panel charging
 
@@ -1207,7 +1213,9 @@ class BasiliskSimulator:
         return battery, rwPowerList, powerSink          
 
 
-    def setup_spacecraft_integrator(self, scObj: spacecraft.Spacecraft) -> spacecraft.Spacecraft:
+    def setup_spacecraft_integrator(self, 
+                                    scObj: spacecraft.Spacecraft
+                                    ) -> spacecraft.Spacecraft:
         
         integration_method = self.cfg.integrator
 
@@ -1234,8 +1242,10 @@ class BasiliskSimulator:
 
     @staticmethod
     def _spaced_satellites_on_same_orbital_plane(satellite_idx: int, 
-                                                separation_ang: float, 
-                                                mu: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+                                                 separation_ang: float, 
+                                                 mu: float
+                                                 ) -> tuple[NDArray[np.float64], 
+                                                            NDArray[np.float64]]:
         """
         Returns the ECI initial conditions for satellite cfg.satellites[satellite_idx]. They are calculated to achieve even
         satellite spacing defined by 'separation_ang'.

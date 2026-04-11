@@ -1,7 +1,10 @@
+import os
+import csv
 import logging
 import numpy as np
-from typing import Any, Optional, Sequence
 from enum import Enum
+from pathlib import Path
+from typing import Any, Optional, Sequence
 
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros
@@ -12,18 +15,26 @@ from Basilisk.simulation import simpleNav
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 
+LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
-SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state
-SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state
+SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
+SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state (0, 1)
+EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.6 # The lower limit for when the battery is considered to have enough charge to exit EMERGENCY mode (0, 1)
+CAPTURE_BATTERY_THRESHOLD = 0.4 # The minimum battery percentage (inclusive) required for entering CAPTURE mode (0, 1)
+COMMS_BATTERY_THRESHOLD = 0.3 # The minimum battery percentage (inclusive) required for entering COMMS mode (0, 1)
+CRITICAL_BATTERY_THRESHOLD = 0.2 # Upper limit (exclusive) for when the battery is considered to have critially low charge left (0, 1)
+MAX_HOURS_SINCE_LAST_COM_THRESHOLD = 48 # Limit (incluse) for when the maximum time has passed since last com. 
+                                        # After this, communication will be prioritized over payload capturing.
+
 
 class PointingMode(str, Enum):
-    INIT = "init"
     COAST = "coast"
     COMMS = "comms"
     CHARGE = "charge"
     CAPTURE = "capture"
+    EMERGENCY = "emergency"
     ERROR = "error"
 
 
@@ -75,32 +86,39 @@ class FswStack(sysModel.SysModel):
         sc_state_out_msg: messaging.SCStatesMsg,
         rw_speed_out_msg: messaging.RWSpeedMsg,
         rw_config_msg: messaging.RWArrayConfigMsg,
+        bat_state_msg: messaging.PowerStorageStatusMsg,
         gs_access_msgs: list[messaging.AccessMsg],
         gs_state_msgs: list[messaging.GroundStateMsg],
-        sun_eclipse_msg: Optional[messaging.EclipseMsg],
-        sun_state_msg: messaging.SpicePlanetStateMsg
+        sun_eclipse_msg: messaging.EclipseMsg,
+        sun_state_msg: messaging.SpicePlanetStateMsg,
+        log_timestamp: str
     ):
         """
         Args:
-        sat (Satellite): current Satellite instance
-        sat_idx (int): Satellite iteration number
-        sc_state_out_msg (messaging.SCStatesMsg): Sc position and velpcity in inerital frame
-        rw_speed_out_msg (messaging.RWSpeedMsg): The angular speeds of all RWs in the SC's RW cluster
-        rw_config_msg (messaging.RWArrayConfigMsg): Desciption of how the SC's RW cluster is defined
-        gs_access_msgs (list[messaging.AccessMsg]): List containing the SC's access to all GSs.
-            Ex: gs_access_msgs[0] will contain the boolean value describing if the spacecraft is within GS[0]'s LOS.
+            sat (Satellite): current Satellite instance
+            sat_idx (int): Satellite iteration number
+            sc_state_out_msg (messaging.SCStatesMsg): Sc position and velpcity in inerital frame
+            rw_speed_out_msg (messaging.RWSpeedMsg): The angular speeds of all RWs in the SC's RW cluster
+            rw_config_msg (messaging.RWArrayConfigMsg): Desciption of how the SC's RW cluster is defined
+            gs_access_msgs (list[messaging.AccessMsg]): List containing the SC's access to all GSs.
+                Ex: gs_access_msgs[0] will contain the boolean value describing if the spacecraft is within GS[0]'s LOS.
     
         """
         super().__init__()
 
         self.ModelTag = f"RwFswStack{sat_idx}"
-        self.pointingMode = PointingMode.INIT
+        self.LogTag = f"FSW{sat_idx}"
+        self.pointingMode = PointingMode.COAST
+        self.batStateMsg = bat_state_msg
         self.gsAccessMsgs = gs_access_msgs
         self.gsStateMsgs = gs_state_msgs
         self.selectedGsIdx: Optional[int] = None 
-        assert sun_eclipse_msg is not None
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
+        self.logTimestamp = log_timestamp
+
+        # Keep track of the last time COMMS was exited (last commuication attempt was completed)
+        self.lastCommsNanos = 0
 
         ## temp
         self.oldSunEclipseMsgShadowFactor = None
@@ -194,7 +212,7 @@ class FswStack(sysModel.SysModel):
         # ---------------------------
         self.changed_pointing_obj: bool = False
 
-        logging.debug(f"[FSW] Created RW FSW stack for satellite {sat_idx}")
+        logging.debug(f"[{self.LogTag}] Created RW FSW stack for satellite {sat_idx}")
 
 
     def UpdateState(self, CurrentSimNanos: int) -> None:
@@ -359,7 +377,6 @@ class FswStack(sysModel.SysModel):
                 self.guid.sigma_R0N = mrp_D
 
 
-
             case PointingMode.CHARGE:
                 """
                 Point solar panels towards Sun, and try to achieve NADIR antenna pointing
@@ -397,8 +414,45 @@ class FswStack(sysModel.SysModel):
                 # Publish the desired attitude
                 self.guid.sigma_R0N = mrp_D
 
+
+            case PointingMode.EMERGENCY:
+                # TODO: Turn off power consumption from RWs 
+                # NOTE: Right now, same as CHARGE
+
+                # Get spacecraft position relative to Earth in inertial frame 
+                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+                r_NB_N = - r_BN_N
+                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+
+                # Get Sun position vector relative to the Earth in inertial frame
+                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+                r_SB_N = r_SN_N - r_BN_N
+                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+                # Want antenna to point nadir as much as possible
+                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+                a_hat = a / np.linalg.norm(a)
+                
+                z_hat = r_SB_N_hat
+                y_hat = a_hat
+                x_hat = np.cross(y_hat, z_hat)
+                z_hat = np.cross(x_hat, y_hat)
+
+                # Direction cosine matrix for the desired attitude
+                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+                # Convert into desired Modified Rodrigues Parameters
+                mrp_D = rbk.C2MRP(C_DN_N)
+                
+                # Publish the desired attitude
+                self.guid.sigma_R0N = mrp_D
+
+
             case _:
-                raise ValueError(f"Undefined pointing mode reached in {self.ModelTag}")
+                logging.debug(f"[{self.LogTag}] Undefined pointing mode '{self.pointingMode}' reached in {self.ModelTag}")
+                raise ValueError("")
         
     
     def _eval_pointing_mode(self, CurrentSimNanos: int) -> None:
@@ -409,15 +463,20 @@ class FswStack(sysModel.SysModel):
         
         old_pointing_mode = self.pointingMode
         
+        # NOTE: Is this even needed if all parameters are assigned during runtime anyway? 
         # Initialize position-dependent logical parameters 
         canCap = False # TODO
         canCom = False # True if a ground station is within the spacecraft's LOS
         canChar = False # True if the spacecraft is illuminated by the sun with enough intensity
 
         # Initialize battery-dependent logical parameters
-        capBatt = False # TODO
-        comBatt = False  # TODO
-        critBatt = False  # TODO
+        capBat = False # True if there is enough remaining battery to enter CAPTURE
+        comBat = False  # True if there is enough remaining battery to enter COMMS 
+        critBat = False  # True if the battery is low enough to enter EMERGENCY
+        exitEmergencyFlag = False # True if in EMERGENCY and the battery has been sufficiently charged
+
+        # Initialize time-dependent logical parameters
+        maxNoCom = False # True if the duration since exiting COMMS last time exceeds a max threshold
 
 
         # ---- Decide if the spacecraft can charge (set canChar) ---- 
@@ -445,16 +504,189 @@ class FswStack(sysModel.SysModel):
                 break
         if not canCom:
             self.selectedGsIdx = None
-    
+
+
+        # ---- Determine battery level (set battery logical params) ---- #
+        batStorageLevel = float(self.batStateMsg.read().storageLevel)
+        batStorageCapacity = float(self.batStateMsg.read().storageCapacity)
+        if batStorageCapacity == 0.0:
+            batStorageFrac = -1
+        else:
+            batStorageFrac = (batStorageLevel / batStorageCapacity)
+
+        # If 'batStorageFrac' is defined, set 'capBat', 'camBat', 'critBat', 'exitEmergencyFlag'
+        if batStorageFrac >= 0:
+            if batStorageFrac >= CAPTURE_BATTERY_THRESHOLD:
+                capBat = True
+            else:
+                capBat = False
+            
+            if batStorageFrac >= COMMS_BATTERY_THRESHOLD:
+                comBat = True
+            else:
+                comBat = False
+
+            if batStorageFrac < CRITICAL_BATTERY_THRESHOLD:
+                critBat = True
+            else:
+                critBat = False
+
+            if (self.pointingMode == PointingMode.EMERGENCY) and batStorageFrac >= EMERGENCY_BATTERY_EXIT_THRESHOLD:
+                exitEmergencyFlag = True
+            else:
+                exitEmergencyFlag = False
+
+
+        # ---- Evaluate the time since last communication (set maxNoCom) ---- #
+        hoursSinceLastComms = (CurrentSimNanos - self.lastCommsNanos) * macros.NANO2HOUR
+        if hoursSinceLastComms >= MAX_HOURS_SINCE_LAST_COM_THRESHOLD:
+            maxNoCom = True
+        else:
+            maxNoCom = False
+
+
+        # ---- Set helper logical parameters for readability and easier easier debugging ---- # 
+        if canCom and comBat:
+            comPossible = True
+        else:
+            comPossible = False
+
+        if canCap and capBat:
+            capPossible = True
+        else:
+            capPossible = False
+
         
         # ---- Mode switching logic ---- #
-        # TODO: Add battery states and check capture state
-        if canCom:
-            self.pointingMode = PointingMode.COMMS
-        elif canChar:
-            self.pointingMode = PointingMode.CHARGE
+        if critBat or (self.pointingMode == PointingMode.EMERGENCY and not exitEmergencyFlag):
+                nextMode = PointingMode.EMERGENCY
+        elif not maxNoCom:
+            if capPossible:
+                nextMode = PointingMode.CAPTURE
+            elif comPossible:
+                nextMode = PointingMode.COMMS
+            elif canChar:
+                nextMode = PointingMode.CHARGE
+            else:
+                nextMode = PointingMode.COAST
+        elif maxNoCom:
+            if comPossible:
+                nextMode = PointingMode.COMMS
+            elif capPossible:
+                nextMode = PointingMode.CAPTURE
+            elif canChar:
+                nextMode = PointingMode.CHARGE
+            else:
+                nextMode = PointingMode.COAST
         else:
-            self.pointingMode = PointingMode.COAST
+            nextMode = PointingMode.ERROR
+
+        self.pointingMode = nextMode
+        
+        
+
+
+
+        # # OLD MODE SWITCHING LOGIC
+        # if canCom:
+        #     self.pointingMode = PointingMode.COMMS
+        # elif canChar:
+        #     self.pointingMode = PointingMode.CHARGE
+        # else:
+        #     self.pointingMode = PointingMode.COAST
         
         if old_pointing_mode != self.pointingMode:
-            logging.debug(f"[FSW] {self.ModelTag} changed its pointing mode to {self.pointingMode} @ time: {CurrentSimNanos*macros.NANO2MIN} minutes")
+            # TODO: Add a log entry in an external file that describes all relevant parameters at the point of mode change
+            logging.debug(f"[{self.LogTag}] {self.ModelTag} changed its pointing mode to {self.pointingMode} @ time: {CurrentSimNanos*macros.NANO2MIN} minutes")
+
+            currentSimMins = CurrentSimNanos * macros.NANO2MIN
+            self._log_mode_switching_logic(
+                currentSimMins=currentSimMins,
+                old_pointing_mode=old_pointing_mode,
+                new_pointing_mode=self.pointingMode,
+                hoursSinceLastComms=hoursSinceLastComms,
+                batStorageFrac=batStorageFrac,
+                canChar=canChar,
+                canCom=canCom,
+                comBat=comBat,
+                canCap=canCap,
+                capBat=capBat,
+                critBat=critBat,
+                maxNoCom=maxNoCom,
+                emergencyExitFlag=exitEmergencyFlag,
+            )
+
+    
+    def _log_mode_switching_logic(
+        self,
+        currentSimMins: float,
+        old_pointing_mode: PointingMode,
+        new_pointing_mode: PointingMode,
+        hoursSinceLastComms: float,
+        batStorageFrac: float,
+        canChar: bool,
+        canCom: bool,
+        comBat: bool,
+        canCap: bool,
+        capBat: bool,
+        critBat: bool,
+        maxNoCom: bool,
+        emergencyExitFlag: bool,
+    ) -> None:
+        """
+        Append one row of mode-switching logic data to a CSV log file.
+
+        The file is created on first use and given a fixed timestamp-based name.
+        """
+
+        # Ensure the log directory exists
+        LOG_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        filename = f"{self.logTimestamp}_{self.LogTag}_mode_switching_logic.csv"
+
+        filepath = LOG_DATA_SAVE_DIR / filename
+
+        header = [
+            "ModelTag",
+            "currentSimMins",
+            "oldPointingMode",
+            "newPointingMode",
+            "hoursSinceLastComms",
+            "batStorageFrac",
+            "canChar",
+            "canCom",
+            "comBat",
+            "canCap",
+            "capBat",
+            "critBat",
+            "maxNoCom",
+            "emergencyExitFlag",
+        ]
+
+        row = [
+            self.ModelTag,
+            currentSimMins,
+            str(old_pointing_mode),
+            str(new_pointing_mode),
+            hoursSinceLastComms,
+            batStorageFrac,
+            canChar,
+            canCom,
+            comBat,
+            canCap,
+            capBat,
+            critBat,
+            maxNoCom,
+            emergencyExitFlag,
+        ]
+
+        file_exists = filepath.exists()
+
+        with open(filepath, mode="a", newline="") as csv_file:
+            writer = csv.writer(csv_file)
+
+            if not file_exists:
+                writer.writerow(header)
+                logging.debug(f"[{self.LogTag}] Mode switching log created for {self.ModelTag}")
+
+            writer.writerow(row)
