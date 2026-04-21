@@ -1,0 +1,630 @@
+#
+#  ISC License
+#
+#  Copyright (c) 2021, Autonomous Vehicle Systems Lab, University of Colorado at Boulder
+#
+#  Permission to use, copy, modify, and/or distribute this software for any
+#  purpose with or without fee is hereby granted, provided that the above
+#  copyright notice and this permission notice appear in all copies.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+#  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+#  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+#  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+#  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+#  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+
+# Main structure adopted from basilisk/examples/MultiSatBskSim/modelsMultiSat/BSK_MultiSatDynamics.py
+
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+import os
+import logging
+import numpy as np
+import matplotlib.pyplot as plt # Only for debug
+import matplotlib.colors as mcolors # only for debug
+from enum import Enum
+from typing import Optional, Any, Union
+from numpy.typing import NDArray
+from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+
+from Basilisk import __path__
+from Basilisk.architecture import messaging
+from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
+                                exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, 
+                                svIntegrators, reactionWheelStateEffector,
+                                RWConfigPayload, groundLocation, thrusterDynamicEffector)
+from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower, fuelTank)
+from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simIncludeGravBody, 
+                                unitTestSupport, vizSupport, fswSetupRW, simIncludeRW, simIncludeThruster)
+
+from object_definitions.Config_def import Config
+from object_definitions.Satellite_def import Satellite
+from object_definitions.SimData_def import SimData, SimObjData
+from object_definitions.MsisInputUpdater_def import MsisInputUpdater
+from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
+from object_definitions.FswStack_def import FswStack
+from object_definitions.MsisInputUpdater_def import (MsisInputUpdater, MSIS_SW_KEYS)
+if TYPE_CHECKING:
+    # This is done to prevent the "low-level" environmental models being dependent 
+    # on the "high-level" orchestrator
+    from object_definitions.BasiliskSimulator_def import BasiliskSimulator 
+
+
+class BasiliskDynamicsModel:
+    """
+    Defines the satellite-side physical models. This includes:
+        * The spacecraft itself (TODO)
+        * Affecting gravity bodies (TODO)
+        * Drag effector (TODO)
+        * SRP effector (TODO)
+        * Reaction wheel effector (TODO)
+        * Thruster effector (TODO)
+        * Solar panels (TODO)
+        * EPS (TODO)
+        * Ground locations (TODO)
+
+    Expected process/task placement:
+    BasiliskSimulator
+    |
+    |---DynamicsProcess_<sat_idx>
+        |
+        |---DynamicsTask_<sat_idx>
+            |
+            |---scObj
+            |---drag      (optional)
+            |---srp       (optional)
+            |---rwEffector
+            |---solarPanels
+            |---rw power models
+            |---power sink
+            |---battery
+            |---recorders
+    """
+    def __init__(self, 
+                 sim: BasiliskSimulator,
+                 cfg: Config,
+                 sat: Satellite,
+                 sat_idx: int
+                 ) -> None:
+        
+        self.sim = sim
+        self.cfg = cfg
+        self.sat = sat
+        self.sat_idx = sat_idx
+        self.logTag = f"DYN{sat_idx}"
+    
+        # Ensure that the environment model has been initialized
+        assert sim.envModel is not None
+        self.envModel: BasiliskEnvironmentModel = sim.envModel
+
+        # Create dynamics task as part of the dynamics process
+        assert sim.dynProcesses[sat_idx] is not None
+        self.dynTaskName = f"DynamicsTask_{sat_idx}"
+        sim.dynProcesses[sat_idx].addTask(sim.CreateNewTask(self.dynTaskName, sim.dynRateNanos)) # type: ignore
+
+        # Initiate modules
+        self.scObj = spacecraft.Spacecraft()
+        self.dragEffector: Optional[dragDynamicEffector.DragDynamicEffector] = None
+        self.srpEffector: Optional[radiationPressure.RadiationPressure] = None
+        self.rwFactory: Optional[simIncludeRW.rwFactory] = None
+        self.rwEffector: Optional[reactionWheelStateEffector.ReactionWheelStateEffector] = None
+
+        # TODO: implement later:
+        self.thrusterFactory: Optional[simIncludeThruster.thrusterFactory] = None
+        self.thrusterEffector: Optional[thrusterDynamicEffector.ThrusterDynamicEffector] = None
+
+        self.solarPanels: list[simpleSolarPanel.SimpleSolarPanel] = []
+        self.rwPowerList: list[ReactionWheelPower.ReactionWheelPower] = []
+        self.battery: Optional[simpleBattery.SimpleBattery] = None
+        self.obcPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+
+        # Persistent message handles exposed to FSW
+        self.sc_state_out_msg: Optional[messaging.SCStatesMsg] = None
+        self.rw_speed_out_msg: Optional[messaging.RWSpeedMsg] = None
+        self.rw_config_msg: Optional[messaging.RWArrayConfigMsg] = None
+        self.bat_state_msg: Optional[messaging.PowerStorageStatusMsg] = None
+        self.gs_access_msgs: list[messaging.AccessMsg] = []
+        self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
+
+        # TODO Recorders commonly used by the simulator
+        # self.scStateRecorder: Optional[Any] = None
+        # self.rwRecorders: list[Any] = []
+        # self.solarPanelRecorders: list[Any] = []
+        # self.rwPowerRecorders: list[Any] = []
+        # self.batteryRecorder: Optional[Any] = None
+        # self.powerSinkRecorder: Optional[Any] = None       
+        
+        # Initialize all dynamics models sequentially
+        self._setup_spacecraft_hub()
+        self._setup_gravity()
+        self._setup_drag_effector()
+        self._setup_srp_effector()
+        self._setup_ground_station_access()
+        self._setup_solar_panels()
+        self._setup_rw_effector()
+        self._setup_thrusters()
+        self._setup_eps()
+        self._setup_integrator()
+        # self._setup_recorders()
+
+        # Schedule all initialized modules to task
+        sim.AddModelToTask(self.dynTaskName, self.scObj, 20)
+        if self.dragEffector is not None: 
+            sim.AddModelToTask(self.dynTaskName, self.dragEffector, 20)
+        if self.srpEffector is not None:
+            sim.AddModelToTask(self.dynTaskName, self.srpEffector, 20)
+        for solarPanel in self.solarPanels:
+            sim.AddModelToTask(self.dynTaskName, solarPanel, 20)
+        sim.AddModelToTask(self.dynTaskName, self.rwEffector, 20)
+        sim.AddModelToTask(self.dynTaskName, self.battery, 20)
+        sim.AddModelToTask(self.dynTaskName, self.obcPowerSink, 20)
+        for rwPower in self.rwPowerList:
+            sim.AddModelToTask(self.dynTaskName, rwPower, 20)
+        
+
+    ###########################
+    # Public helper functions #
+    ###########################
+
+    def connect_fsw(self, fsw: FswStack) -> None:
+        pass
+
+
+
+
+    ##########################################
+    # Private dynamics model setup functions #
+    ########################################## 
+
+    def _setup_spacecraft_hub(self) -> None:
+        """
+        Initialize the spacecraft hub and set initial conditions.
+        TODO: Modify init contition to use deployer case with random satellite ejection vector
+
+        The method sets the attribute:
+            self.scObj (Spacecraft): Spacecraft instance containing hub parameters from cfg and initial conditions
+            self.sc_state_out_msg (messaging.SCStatesMsg): Spacecraft state msg
+        """
+        self.scObj.ModelTag = f"spacecraft_{self.sat_idx}"
+        self.scObj.hub.mHub = self.sat.m_s
+        self.scObj.hub.r_BcB_B = [[0.0], [0.0], [0.0]]  # [m] position vector of body-fixed point B relative to CM
+        self.scObj.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(self.sat.I_B) # [kg m^2] Inertia of hub about point Bc in B frame components
+
+        # Assign initial conditions
+        if self.cfg.sat_init_source == "oe":
+            # Get initial state vector from orbital elements
+            assert self.envModel.gravFactory is not None
+            oe = self.sat.init_OEs
+            mu = self.envModel.gravFactory.gravBodies["earth"].mu
+            rN, vN = orbitalMotion.elem2rv(mu, oe)
+
+        elif self.cfg.sat_init_source == "vec":
+            # Use initial state given directly from config
+            rN = self.sat.init_pos # [m]   In N frame (inertial = ECI)
+            vN = self.sat.init_vel # [m/s] in N frame (inertial = ECI)
+
+        else:
+            raise ValueError(f"[{self.logTag}] Unrecognized satellite initial condition source '{self.cfg.sat_init_source}'")
+
+        # Set the initial conditions for the spacecraft object
+        self.scObj.hub.r_CN_NInit = rN  # [m]   r_BN_N
+        self.scObj.hub.v_CN_NInit = vN  # [m/s] v_BN_N
+        self.scObj.hub.sigma_BNInit = self.sat.init_att  # orientation of Body(B) relative to inertial(N) expressed using MRP
+        self.scObj.hub.omega_BN_BInit = self.sat.init_angvel  # [rad/s] angular velocity of Body(B) relative to inertial(N) expressed in (B)
+
+        # Assign msg attribute
+        self.sc_state_out_msg = self.scObj.scStateOutMsg
+        
+        logging.debug(f"[{self.logTag}] Spacecraft hub initialized with initial conditions")
+
+
+    def _setup_gravity(self) -> None:
+        """
+        Add all configured gravity bodies to the spacecraft.
+        """
+        self.envModel.add_spacecraft_to_grav_bodies(self.scObj)
+        logging.debug(f"[{self.logTag}] Gravity bodies added to '{self.scObj.ModelTag}'") 
+
+
+    def _setup_drag_effector(self) -> None:
+        """
+        if the simulation is configured to use an atmosphere model, then define the drag effector,
+        mount it on the satellite object, and schedule it in the simulation task
+        # TODO: Investigate other effectors than cannonball
+
+        The method creates and populates the attribute:
+            self.dragEffector (DragDynamicEffector): 
+                Drag effector asserting a force on the spacecraft depending on the atmosphere model density output
+        """
+
+        assert self.envModel is not None
+        atmObj = self.envModel.atmObj
+        useMsis = self.cfg.useMsisDrag
+        useExp = self.cfg.useExponentialDensityDrag
+        
+        if ((not useMsis) and (not useExp)) or (atmObj is None):
+            logging.debug(f"""[{self.logTag}] no atmosphere model is initialized 
+                          -> Drag disabled for '{self.scObj.ModelTag}'""")
+            self.dragEffector = None
+            return
+        
+        if useMsis and (not isinstance(atmObj, msisAtmosphere.MsisAtmosphere)):
+            raise TypeError(f"""[{self.logTag}] Basilisk is configured to use an MSIS atmosphere model, but atmosphere object 'atmObj' is not of type 'MsisAtmosphere'
+                            -> Drag disabled for '{self.scObj.ModelTag}'""")
+        
+        elif useExp and (not useMsis) and (not isinstance(atmObj, exponentialAtmosphere.ExponentialAtmosphere)):
+            raise TypeError(f"""[{self.logTag}] Basilisk is configured to use an Exponential atmosphere model, but atmosphere object 'atmObj' is not of type 'ExponentialAtmosphere'
+                            -> Drag disabled for '{self.scObj.ModelTag}'""")
+        
+        # Register spacecraft with the shared atmosphere model
+        atm_out_msg = self.envModel.add_spacecraft_to_atmosphere(self.scObj)
+        assert atm_out_msg is not None
+
+        # Create drag effector
+        dragEffector = dragDynamicEffector.DragDynamicEffector()
+        dragEffector.ModelTag = f"{self.scObj.ModelTag}_dragEff"
+        dragEffector.cannonballDrag() # TODO
+
+        # Set core parameters
+        core = dragDynamicEffector.DragBaseData()
+        core.dragCoeff = self.sat.C_D # getattr(sat, "C_D", 2.2)
+        core.projectedArea = self.sat.A_D # getattr(sat, "A_D", 0.06)
+        dragEffector.coreParams = core
+
+        # Subscribe to density from this spacecraft's atmosphere message
+        dragEffector.atmoDensInMsg.subscribeTo(atm_out_msg)
+
+        self.scObj.addDynamicEffector(dragEffector)
+        self.dragEffector = dragEffector
+        
+        logging.debug(f"[{self.logTag}] Drag effector initialized for '{self.scObj.ModelTag}'")
+
+
+    def _setup_srp_effector(self) -> None:
+        """
+        If the simulation is configured to use SRP, then define the SRP effector and
+        mount it on the spacecraft instance
+
+        The method sets the following attributes:
+            self.srpEffector (RadiationPressure): 
+                SRP effector asserting a force on the spacecraft depending on the Sun illumination
+            self.sun_eclipse_msg (EclipseMsg): Message containing the illumination factor from the Sun on the sc
+        """
+
+        # Don't mount SRP effector on the spacecraft object if useSRP == False or any Optional inputs are None
+        if (not self.cfg.useSRP) or (self.envModel.eclipseObj is None):
+            logging.debug(f"""[{self.logTag}] SRP disabled for '{self.scObj.ModelTag}'""")
+            self.srpEffector = None
+            self.sun_eclipse_msg = None
+            return
+        
+        # Register spacecraft with the shared eclipse model
+        sun_eclipse_msg = self.envModel.add_spacecraft_to_eclipse(self.scObj)
+
+        # Latest eclipseOutMsg belongs to this spacecraft because it was just added
+        assert self.envModel.spiceObj is not None
+        sun_msg = self.envModel.spiceObj.planetStateOutMsgs[self.envModel.sun_idx]
+
+        srpEffector = radiationPressure.RadiationPressure()
+        srpEffector.setUseCannonballModel()
+        srpEffector.coefficientReflection = self.sat.C_R
+        srpEffector.area = self.sat.A_srp
+
+        # Subscribe to Sun ephemeris + this spacecraft’s eclipse factor
+        srpEffector.sunEphmInMsg.subscribeTo(sun_msg)
+        srpEffector.sunEclipseInMsg.subscribeTo(sun_eclipse_msg)
+
+        # Attach SRP effector to spacecraft and set attributes
+        self.scObj.addDynamicEffector(srpEffector)
+        self.srpEffector = srpEffector
+        self.sun_eclipse_msg = sun_eclipse_msg
+        
+        logging.debug(f"[{self.logTag}] SRP effector initialized for '{self.scObj.ModelTag}'")
+
+
+    def _setup_ground_station_access(self) -> None:
+        """
+        Connect spacecraft to all shared ground stations.
+        """
+        gs_access_msgs = self.envModel.connect_spacecraft_to_ground_stations(self.scObj)
+
+        if gs_access_msgs is None:
+            self.gs_access_msgs = []
+        else:
+            self.gs_access_msgs = gs_access_msgs
+
+        logging.debug(f"""[{self.logTag}] Ground-station access hookup complete for 
+                      spcaecraft {self.scObj.ModelTag} with {len(self.gs_access_msgs)} ground locations""")
+
+
+    def _setup_solar_panels(self) -> None:
+        """
+        Create and attach all solar panels.
+
+        The method sets the following attributes:
+            self.solarPanels (list[SimpleSolarPanel]): All solar panel instances, one for each solar panel in cfg
+        """
+        assert self.envModel.spiceObj is not None
+
+        if not self.cfg.useSRP:
+            # Without SRP effector, the panels do strictly require SRP force modeling.
+            # -> Only require sun state from SPICE
+            sun_eclipse_msg = None
+        else:
+            assert self.sun_eclipse_msg is not None
+            sun_eclipse_msg = self.sun_eclipse_msg
+
+        sun_msg = self.envModel.spiceObj.planetStateOutMsgs[self.envModel.sun_idx]
+
+        # Initialize solar panels
+        self.solarPanels = []
+        for i, sp in enumerate(self.cfg.solar_panels):
+
+            # Generate solar panel module
+            solarPanel = simpleSolarPanel.SimpleSolarPanel()
+            solarPanel.ModelTag = f"{self.scObj.ModelTag}_sp{i}"
+
+            solarPanel.stateInMsg.subscribeTo(self.scObj.scStateOutMsg)
+            solarPanel.sunInMsg.subscribeTo(sun_msg)
+
+            # If eclipse exists, use it. 
+            if sun_eclipse_msg is not None:
+                solarPanel.sunEclipseInMsg.subscribeTo(sun_eclipse_msg)
+            
+            solarPanel.setPanelParameters(sp.nHat_B, sp.panel_area, sp.panel_efficiency)
+
+            self.solarPanels.append(solarPanel)
+
+        logging.debug(f"""[{self.logTag}] {len(self.solarPanels)} solar panel(s) initialized for '{self.scObj.ModelTag}'""")
+
+
+    def _setup_rw_effector(self) -> None:
+        """
+        Generate reaction wheel object(s) using the config parameters, create the RW state effector and 
+        add it to the spacecraft.
+
+        This method sets the following attributes:
+            self.rwFactory (rwFactory): The factory used to generate all RWs for this spacecraft
+            self.rwEffector (ReactionWheelStateEffector): RW effector applying a torque on the spacecraft
+            self.rw_speed_out_msg (messaging.RWSpeedMsg): Msg containing the individual RW's angular velocity
+            self.rw_config_msg (messaging.RWArrayConfigMsg): Msg containing the RW cluster configuration
+        """
+        
+        rwFactory = simIncludeRW.rwFactory()
+
+        # Select internal RW physics model
+        match self.cfg.RW_model:
+            case "BalancedWheels":
+                varRWModel: int = messaging.BalancedWheels
+            case "JitterSimple":
+                varRWModel: int = messaging.JitterSimple
+            case "JitterFullyCoupled":
+                varRWModel: int = messaging.JitterFullyCoupled
+            case _:
+                raise ValueError(f"Unrecognized 'RW_model' received."
+                                f"Got '{self.cfg.RW_model}', expected ['BalancedWheels', 'JitterSimple', 'JitterFullyCoupled']")
+            
+        # Create RWs (one for each vector present in self.cfg.spinUVecs)
+        RWs: list[RWConfigPayload.RWConfigPayload] = []
+        for i, spinUVec in enumerate(self.cfg.spinUVecs):
+            if self.cfg.useFriction:
+                RW = rwFactory.create(
+                    'custom',
+                    spinUVec,
+                    label =         f"sc{self.sat_idx}W{i}",
+                    RWModel =       varRWModel,
+                    rWB_B =         [0., 0., 0.],
+                    Omega =         self.cfg.init_rpm,
+                    Omega_max =     self.cfg.max_rpm,
+                    maxMomentum =   self.cfg.maxMomentum,
+                    u_max =         self.cfg.maxTorque,
+                    u_min =         self.cfg.minTorque,
+                    # Js =            self.cfg.I_RW, # Js calculated using Omega_max and maxMomentum
+                    useMinTorque =  self.cfg.useMinTorque,
+                    useMaxTorque =  True,
+                    useFriction =   True,
+                    fCoulomb =      self.cfg.fCoulomb,
+                    fStatic =       self.cfg.fStatic,
+                    betaStatic =    self.cfg.betaStatic,
+                    cViscous =      self.cfg.cViscous
+                )
+            else:
+                RW = rwFactory.create(
+                    'custom',
+                    spinUVec,
+                    label =         f"sc{self.sat_idx}W{i}",
+                    RWModel =       varRWModel,
+                    rWB_B =         [0., 0., 0.],
+                    Omega =         self.cfg.init_rpm,
+                    Omega_max =     self.cfg.max_rpm,
+                    maxMomentum =   self.cfg.maxMomentum,
+                    u_max =         self.cfg.maxTorque,
+                    u_min =         self.cfg.minTorque,
+                    # Js =            self.cfg.I_RW, # Js calculated using Omega_max and maxMomentum
+                    useMinTorque =  self.cfg.useMinTorque,
+                    useMaxTorque =  True,
+                )
+            RWs.append(RW)
+
+        # Create RW effector and attach to the spacecraft 
+        rwEffector = reactionWheelStateEffector.ReactionWheelStateEffector()
+        rwEffector.ModelTag = f"{self.scObj.ModelTag}_rwEff"
+        rwFactory.addToSpacecraft(self.scObj.ModelTag, rwEffector, self.scObj)        
+
+        # Set attributes
+        self.rwFactory = rwFactory
+        self.rwEffector = rwEffector
+        self.rw_speed_out_msg = rwEffector.rwSpeedOutMsg
+        self.rw_config_msg = rwFactory.getConfigMessage()
+        
+        logging.debug(f"[{self.logTag}] Reaction wheel effector with {len(RWs)} RWs initialized for '{self.scObj.ModelTag}'")
+
+
+    def _setup_thrusters(self) -> None:
+        """
+        TODO
+        Placeholder for future thruster/fuel system
+        """
+        self.thrusterFactory = None
+        self.thrusterEffector = None
+        logging.debug(f"[{self.logTag}] Thruster subsystem not yet implemented. Coming soon...")
+
+        # location = [[0.0, 0.0, 0.0]]
+        # direction = [[0.0, 0.0, 1.0]]
+
+        # # create the thruster devices by specifying the thruster type and its location and direction
+        # for pos_B, dir_B in zip(location, direction):
+        #     self.thrusterFactory.create('MOOG_Monarc_90HT', pos_B, dir_B, useMinPulseTime=False)
+
+        # self.numThr = self.thrusterFactory.getNumOfDevices()
+
+        # # create thruster object container and tie to spacecraft object
+        # self.thrusterFactory.addToSpacecraft("thrusterFactory", self.thrusterDynamicEffector, self.scObject)
+
+
+    def _setup_fuel_tank(self) -> None:
+        """
+        TODO
+        Placeholder for the future thruster/fuel system
+        """
+        # # Define the tank
+        # self.tankModel = fuelTank.FuelTankModelUniformBurn()
+        # self.fuelTankStateEffector.setTankModel(self.tankModel)
+        # self.tankModel.propMassInit = 50.0
+        # self.tankModel.maxFuelMass = 75.0
+        # self.tankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
+        # self.fuelTankStateEffector.r_TB_B = [[0.0], [0.0], [0.0]]
+        # self.tankModel.radiusTankInit = 1
+        # self.tankModel.lengthTank = 1
+        
+        # # Add the tank and connect the thrusters
+        # self.scObject.addStateEffector(self.fuelTankStateEffector)
+        # self.fuelTankStateEffector.addThrusterSet(self.thrusterDynamicEffector)
+
+
+    def _setup_eps(self) -> None:
+        """
+        Initialize all power modules: battery, RW power consumption, OBC power consumption, solar panel charging
+
+        This method sets the following attributres:
+            self.battery (SimpleBattery): The spacecraft power storage device. 
+                All other power consumers/sources affect its remaining charge
+            self.rwPowerList (ReactionWheelPower): Modules converting RW actuation into realistic power consumption
+            self.obcPowerSink (SimplePowerSink): Constant power draw representing the OBC consumption
+            self.bat_state_msg (messaging.PowerStorageStatusMsg): Remaining battery charge 
+        """
+        
+        assert self.rwFactory is not None
+        assert self.rwEffector is not None
+        
+        # Create a simpleBattery
+        battery = simpleBattery.SimpleBattery()
+        battery.ModelTag = f"{self.scObj.ModelTag}_battery"
+        storageCapacity_Wh = self.cfg.bat_storage_capacity # [Wh]
+        storageCapacity_Ws = storageCapacity_Wh * 3600.0 # [Ws = Joules]
+        battery.storageCapacity = storageCapacity_Ws
+        battery.storedCharge_Init = storageCapacity_Ws * self.cfg.init_bat_charge 
+
+        # Create RW power modules
+        rwPowerList: list[ReactionWheelPower.ReactionWheelPower] = []
+        numRWs = self.rwFactory.getNumOfDevices()
+        for i in range(numRWs):
+            rwPower = ReactionWheelPower.ReactionWheelPower()
+            rwPower.ModelTag = f"{self.scObj.ModelTag}_RW{i}Power"
+            rwPower.basePowerNeed = self.cfg.RW_base_draw # [W]
+            rwPower.rwStateInMsg.subscribeTo(self.rwEffector.rwOutMsgs[i])
+            
+            if False: # TODO: Is it realistic for RWs to generate electricity on smallsats?
+                rwPower.mechToElecEfficiency = 0.5 # TODO: Realistic value
+            
+            rwPowerList.append(rwPower)
+
+        # Constant power consumption from OBC
+        obcPowerSink = simplePowerSink.SimplePowerSink()
+        obcPowerSink.ModelTag = f"{self.scObj.ModelTag}_OBCPower"
+        obcPowerSink.nodePowerOut = -1 * self.cfg.OBC_const_draw  # [W]
+        
+        # Add all power sources/consumers to battery
+        for sp in self.solarPanels:
+            battery.addPowerNodeToModel(sp.nodePowerOutMsg)
+
+        for rwPow in rwPowerList:
+            battery.addPowerNodeToModel(rwPow.nodePowerOutMsg)
+        
+        battery.addPowerNodeToModel(obcPowerSink.nodePowerOutMsg)
+        
+        # Assign attributes
+        self.battery = battery
+        self.rwPowerList = rwPowerList
+        self.obcPowerSink = obcPowerSink
+        self.bat_state_msg = battery.batPowerOutMsg
+
+        logging.debug(f"[{self.logTag}] EPS initialized for '{self.scObj.ModelTag}'")         
+
+
+    def _setup_integrator(self) -> None:
+        integration_method = self.cfg.integrator
+
+        # Select integration method
+        match integration_method:
+            case "RKF45":
+                integratorObj = svIntegrators.svIntegratorRKF45(self.scObj)
+            case "RKF78":
+                
+                integratorObj = svIntegrators.svIntegratorRKF78(self.scObj)
+            case _:
+                logging.debug(f"[{self.logTag}] Selecting defualt RK4 numerical integrator for '{self.scObj.ModelTag}'")
+                return # Use standard integration method RK4
+        
+        # Set the object's non-default integration method
+        self.scObj.setIntegrator(integratorObj)
+
+        # Keep a reference so it doesn't get CE'ed
+        self.sim.integrators.append(integratorObj)
+
+        logging.debug(f"[{self.logTag}] Selecting {integration_method} numerical integrator for '{self.scObj.ModelTag}'")
+
+
+    # def _setup_recorders(self) -> None:
+    #     """
+    #     TODO
+    #     Create common recorders needed by the simulator and future FSW plumbing.
+    #     """
+    #     assert self.scObj is not None
+
+    #     samplingTime = self.sim.samplingTime
+
+    #     self.scStateRecorder = self.scObj.scStateOutMsg.recorder(samplingTime)
+    #     self.sim.AddModelToTask(self.dynTaskName, self.scStateRecorder)
+
+    #     if self.rwEffector is not None:
+    #         for j in range(len(self.cfg.spinUVecs)):
+    #             rwLog = self.rwEffector.rwOutMsgs[j].recorder(samplingTime)
+    #             self.sim.AddModelToTask(self.dynTaskName, rwLog)
+    #             self.rwRecorders.append(rwLog)
+
+    #     for sp in self.solarPanels:
+    #         spLog = sp.nodePowerOutMsg.recorder(samplingTime)
+    #         self.sim.AddModelToTask(self.dynTaskName, spLog)
+    #         self.solarPanelRecorders.append(spLog)
+
+    #     for rwPow in self.rwPowerList:
+    #         rwPowLog = rwPow.nodePowerOutMsg.recorder(samplingTime)
+    #         self.sim.AddModelToTask(self.dynTaskName, rwPowLog)
+    #         self.rwPowerRecorders.append(rwPowLog)
+
+    #     if self.powerSink is not None:
+    #         self.powerSinkRecorder = self.powerSink.nodePowerOutMsg.recorder(samplingTime)
+    #         self.sim.AddModelToTask(self.dynTaskName, self.powerSinkRecorder)
+
+    #     if self.battery is not None:
+    #         self.batteryRecorder = self.battery.batPowerOutMsg.recorder(samplingTime)
+    #         self.sim.AddModelToTask(self.dynTaskName, self.batteryRecorder)
+
+
+
