@@ -106,6 +106,7 @@ class FswStack(sysModel.SysModel):
         """
         super().__init__()
 
+        # self.sim = sim
         self.ModelTag = f"RwFswStack{sat_idx}"
         self.LogTag = f"FSW{sat_idx}"
         self.pointingMode = PointingMode.COAST
@@ -124,6 +125,9 @@ class FswStack(sysModel.SysModel):
         self.oldSunEclipseMsgShadowFactor = None
         self.prevGsPosPrintHours = 0.
         ##
+
+        # Initialize mode switching log
+        self._log_mode_switching_logic(write_header_only=True)
         
 
         # ----------------------------
@@ -596,9 +600,6 @@ class FswStack(sysModel.SysModel):
         #     self.pointingMode = PointingMode.COAST
         
         if old_pointing_mode != self.pointingMode:
-            # TODO: Add a log entry in an external file that describes all relevant parameters at the point of mode change
-            logging.debug(f"[{self.LogTag}] {self.ModelTag} changed its pointing mode to {self.pointingMode} @ time: {CurrentSimNanos*macros.NANO2MIN} minutes")
-
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
             self._log_mode_switching_logic(
                 currentSimMins=currentSimMins,
@@ -619,24 +620,24 @@ class FswStack(sysModel.SysModel):
     
     def _log_mode_switching_logic(
         self,
-        currentSimMins: float,
-        old_pointing_mode: PointingMode,
-        new_pointing_mode: PointingMode,
-        hoursSinceLastComms: float,
-        batStorageFrac: float,
-        canChar: bool,
-        canCom: bool,
-        comBat: bool,
-        canCap: bool,
-        capBat: bool,
-        critBat: bool,
-        maxNoCom: bool,
-        emergencyExitFlag: bool,
+        currentSimMins: Optional[float] = None,
+        old_pointing_mode: Optional[PointingMode] = None,
+        new_pointing_mode: Optional[PointingMode] = None,
+        hoursSinceLastComms: Optional[float] = None,
+        batStorageFrac: Optional[float] = None,
+        canChar: Optional[bool] = None,
+        canCom: Optional[bool] = None,
+        comBat: Optional[bool] = None,
+        canCap: Optional[bool] = None,
+        capBat: Optional[bool] = None,
+        critBat: Optional[bool] = None,
+        maxNoCom: Optional[bool] = None,
+        emergencyExitFlag: Optional[bool] = None,
+        write_header_only: bool = False,
     ) -> None:
         """
-        Append one row of mode-switching logic data to a CSV log file.
-
-        The file is created on first use and given a fixed timestamp-based name.
+        Initialize log or append one row of mode-switching logic data to a CSV log file.
+        If write_header_only=True, only ensure the file exists and write the header if missing.
         """
 
         # Ensure the log directory exists
@@ -688,5 +689,25 @@ class FswStack(sysModel.SysModel):
             if not file_exists:
                 writer.writerow(header)
                 logging.debug(f"[{self.LogTag}] Mode switching log created for {self.ModelTag}")
+
+            if write_header_only:
+                return
+
+            row = [
+                self.ModelTag,
+                currentSimMins,
+                str(old_pointing_mode) if old_pointing_mode is not None else None,
+                str(new_pointing_mode) if new_pointing_mode is not None else None,
+                hoursSinceLastComms,
+                batStorageFrac,
+                canChar,
+                canCom,
+                comBat,
+                canCap,
+                capBat,
+                critBat,
+                maxNoCom,
+                emergencyExitFlag,
+            ]
 
             writer.writerow(row)
