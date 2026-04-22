@@ -19,24 +19,21 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
-
-import numpy as np
 
 from Basilisk.architecture import messaging
 from Basilisk.utilities import SimulationBaseClass, simulationArchTypes, macros, unitTestSupport, vizSupport
 from Basilisk.simulation import spacecraft
 
 from object_definitions.Config_def import Config
+from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
+from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
-from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
-from object_definitions.FswStack_def import FswStack
 
 
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
@@ -255,12 +252,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # 3) Visualization
         # ------------------------------------------------------------------
         if len(self.scRuntimeBundles) > 0:
-            vizSupport.enableUnityVisualization(
-                self,
-                self.scRuntimeBundles[0].dynModel.dynTaskName, # type: ignore
-                self._extract_scObjs_from_scRuntimeBundles(),
-                saveFile=VIZARD_SAVE_PATH,
-            )
+            self._configure_vizard()
+            
 
         # ------------------------------------------------------------------
         # 4) Initialize and configure stop time
@@ -373,6 +366,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswProcesses[sat_idx].addTask(self.CreateNewTask(fswTaskName, self.fswRateNanos)) # type: ignore
         self.AddModelToTask(fswTaskName, fsw)
 
+        return fsw
+
     
     def _build_spacecraft_runtime_bundle(self, sat_idx: int, sat: Satellite, 
                                          dynModel: BasiliskDynamicsModel, fsw: FswStack
@@ -382,7 +377,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         NOTE: Method is expected to be called from within a cfg.satellites loop
         """
 
-        
         # Construct spacecraft runtime bundle
         scRuntimeBundle = SpacecraftRuntimeBundle(
             sat_idx = sat_idx,
@@ -421,6 +415,154 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
     # ======================================================================
     # Private helper
     # ======================================================================
+
+    def _configure_vizard(self):
+        """
+        Configure Vizard for the current multi-spacecraft simulation.
+
+        Features:
+            - one stacked storage panel per spacecraft
+                * battery charge
+                * fuel level
+            - RW panels shown by default
+            - spacecraft and planet coordinate axes visible by default
+            - orbit/trajectory lines shown
+        """
+        if len(self.scRuntimeBundles) == 0 or None in self.scRuntimeBundles:
+            raise RuntimeError("[BSK] Cannot configure Vizard before all spacecraft runtime bundles exist.")
+
+        if not vizSupport.vizFound:
+            logging.warning("[BSK] Vizard support not available. Skipping Vizard configuration.")
+            self.viz = None
+            self.vizGenericStorageList = []
+            return None
+
+        sc_bundles = [bundle for bundle in self.scRuntimeBundles if bundle is not None]
+        sc_objs = [bundle.scObj for bundle in sc_bundles]
+
+        rw_effector_list = []
+        generic_storage_list = []
+
+        # Keep Python-side references alive for the whole simulation
+        self.vizGenericStorageList = generic_storage_list
+
+        # Only include thruster list if all spacecraft actually have one
+        use_thrusters = all(bundle.dynModel.thrusterEffector is not None for bundle in sc_bundles)
+        thr_effector_list = []
+
+        for bundle in sc_bundles:
+            dyn = bundle.dynModel
+
+            rw_effector_list.append(dyn.rwEffector)
+
+            if use_thrusters:
+                # Vizard expects a list-of-lists, one inner list per spacecraft
+                thr_effector_list.append([dyn.thrusterEffector])
+
+            sc_storage_panels = []
+
+            # -------------------------------------------------
+            # Battery storage bar
+            # -------------------------------------------------
+            if dyn.battery is not None:
+                battery_panel = vizSupport.vizInterface.GenericStorage()
+                battery_panel.label = "Battery"
+                battery_panel.units = "W-s"
+                battery_panel.color = vizSupport.vizInterface.IntVector(
+                    vizSupport.toRGBA255("red") +
+                    vizSupport.toRGBA255("orange") +
+                    vizSupport.toRGBA255("green")
+                )
+                battery_panel.thresholds = vizSupport.vizInterface.IntVector([20, 60])
+
+                battery_in_msg = messaging.PowerStorageStatusMsgReader()
+                battery_in_msg.subscribeTo(dyn.battery.batPowerOutMsg)
+                battery_panel.batteryStateInMsg = battery_in_msg
+
+                battery_panel.this.disown() # type: ignore
+                sc_storage_panels.append(battery_panel)
+
+            # -------------------------------------------------
+            # Fuel tank storage bar
+            # -------------------------------------------------
+            if dyn.fuelTankEffector is not None:
+                fuel_panel = vizSupport.vizInterface.GenericStorage()
+                fuel_panel.label = "Fuel"
+                fuel_panel.units = "kg"
+                fuel_panel.color = vizSupport.vizInterface.IntVector(
+                    vizSupport.toRGBA255("red") +
+                    vizSupport.toRGBA255("orange") +
+                    vizSupport.toRGBA255("cyan")
+                )
+                fuel_panel.thresholds = vizSupport.vizInterface.IntVector([20, 60])
+
+                fuel_in_msg = messaging.FuelTankMsgReader()
+                fuel_in_msg.subscribeTo(dyn.fuelTankEffector.fuelTankOutMsg)
+                fuel_panel.fuelTankStateInMsg = fuel_in_msg
+
+                fuel_panel.this.disown() # type: ignore
+                sc_storage_panels.append(fuel_panel)
+
+            generic_storage_list.append(sc_storage_panels)
+
+        first_dyn_task_name = sc_bundles[0].dynModel.dynTaskName
+
+        if use_thrusters:
+            self.viz = vizSupport.enableUnityVisualization(
+                self,
+                first_dyn_task_name,
+                sc_objs,
+                saveFile=VIZARD_SAVE_PATH,
+                rwEffectorList=rw_effector_list,
+                thrEffectorList=thr_effector_list,
+                genericStorageList=generic_storage_list,
+            )
+        else:
+            self.viz = vizSupport.enableUnityVisualization(
+                self,
+                first_dyn_task_name,
+                sc_objs,
+                saveFile=VIZARD_SAVE_PATH,
+                rwEffectorList=rw_effector_list,
+                genericStorageList=generic_storage_list,
+            )
+
+        # -------------------------------------------------
+        # General Vizard display defaults
+        # -------------------------------------------------
+        self.viz.settings.showSpacecraftLabels = True
+
+        # Show Earth-centered orbit/trajectory traces
+        self.viz.settings.orbitLinesOn = 1
+        self.viz.settings.trueTrajectoryLinesOn = -1
+
+        # Show spacecraft and planet coordinate axes, but hide axis labels
+        self.viz.settings.spacecraftCSon = 1
+        self.viz.settings.planetCSon = 1
+        self.viz.settings.showCSLabels = -1
+
+        if len(sc_objs) > 0:
+            self.viz.settings.mainCameraTarget = sc_objs[0].ModelTag
+            self.viz.liveSettings.relativeOrbitChief = sc_objs[0].ModelTag
+
+        for bundle in sc_bundles:
+            vizSupport.setInstrumentGuiSetting(
+                self.viz,
+                spacecraftName=bundle.scObj.ModelTag,
+                showGenericStoragePanel=True
+            )
+
+            vizSupport.setActuatorGuiSetting(
+                self.viz,
+                spacecraftName=bundle.scObj.ModelTag,
+                viewRWPanel=True,
+                viewRWHUD=False,
+                showRWLabels=False
+            )
+
+        logging.debug("[BSK] Vizard configured")
+        return self.viz
+    
 
     def _output_data(self) -> None:
         """
