@@ -57,18 +57,19 @@ if TYPE_CHECKING:
 
 class BasiliskDynamicsModel:
     """
-    Defines the satellite-side physical models. This includes:
-        * The spacecraft itself (TODO)
-        * Affecting gravity bodies (TODO)
-        * Drag effector (TODO)
-        * SRP effector (TODO)
-        * Reaction wheel effector (TODO)
-        * Thruster effector (TODO)
-        * Solar panels (TODO)
-        * EPS (TODO)
-        * Ground locations (TODO)
+    Creates a Basilisk Spacecraft instance, adds it to all initialized environment models 
+    and attaches all components/effectors. The dynamics model includes includes:
+        * The spacecraft itself 
+        * Affecting gravity bodies 
+        * Drag effector 
+        * SRP effector 
+        * Reaction wheel effector 
+        * Thruster effector 
+        * Solar panels 
+        * EPS 
+        * Ground locations 
 
-    Expected process/task placement:
+    All dynamics models, and theri place in the BasiliskSimulator process/task architecture:
     BasiliskSimulator
     |
     |---DynamicsProcess_<sat_idx>
@@ -79,8 +80,8 @@ class BasiliskDynamicsModel:
             |---drag      (optional)
             |---srp       (optional)
             |---rwEffector
-            |---solarPanels
-            |---rw power models
+            |---solarPanel(s)
+            |---rw power model(s)
             |---power sink
             |---battery
             |---recorders
@@ -172,7 +173,11 @@ class BasiliskDynamicsModel:
     ###########################
 
     def connect_fsw(self, fsw: FswStack) -> None:
-        pass
+        """
+        Connect the computed FSW RW torque to the RW effector
+        """
+        assert self.rwEffector is not None
+        self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
 
 
 
@@ -338,8 +343,7 @@ class BasiliskDynamicsModel:
         else:
             self.gs_access_msgs = gs_access_msgs
 
-        logging.debug(f"""[{self.logTag}] Ground-station access hookup complete for 
-                      spcaecraft {self.scObj.ModelTag} with {len(self.gs_access_msgs)} ground locations""")
+        logging.debug(f"""[{self.logTag}] Ground-station access hookup complete for '{self.scObj.ModelTag}' with {len(self.gs_access_msgs)} ground locations""")
 
 
     def _setup_solar_panels(self) -> None:
