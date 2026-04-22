@@ -45,7 +45,6 @@ from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simI
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimData_def import SimData, SimObjData
-from object_definitions.MsisInputUpdater_def import MsisInputUpdater
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 from object_definitions.FswStack_def import FswStack
 from object_definitions.MsisInputUpdater_def import (MsisInputUpdater, MSIS_SW_KEYS)
@@ -53,6 +52,9 @@ if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
     # on the "high-level" orchestrator
     from object_definitions.BasiliskSimulator_def import BasiliskSimulator 
+
+
+ACCEPTED_THRUSTER_MODELS = ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
 
 
 class BasiliskDynamicsModel:
@@ -108,21 +110,27 @@ class BasiliskDynamicsModel:
         self.dynTaskName = f"DynamicsTask_{sat_idx}"
         sim.dynProcesses[sat_idx].addTask(sim.CreateNewTask(self.dynTaskName, sim.dynRateNanos)) # type: ignore
 
-        # Initiate modules
+        # Initialize spacecraft instance
         self.scObj = spacecraft.Spacecraft()
+
+        # Disturbance effector modules
         self.dragEffector: Optional[dragDynamicEffector.DragDynamicEffector] = None
         self.srpEffector: Optional[radiationPressure.RadiationPressure] = None
+        
+        # Satellite actuator modules
         self.rwFactory: Optional[simIncludeRW.rwFactory] = None
         self.rwEffector: Optional[reactionWheelStateEffector.ReactionWheelStateEffector] = None
-
-        # TODO: implement later:
         self.thrusterFactory: Optional[simIncludeThruster.thrusterFactory] = None
         self.thrusterEffector: Optional[thrusterDynamicEffector.ThrusterDynamicEffector] = None
 
+        # Fuel and Electronic power system modules
+        self.fuelTankModel: Optional[fuelTank.FuelTankModelUniformBurn] = None
+        self.fuelTankEffector: Optional[fuelTank.FuelTank] = None
         self.solarPanels: list[simpleSolarPanel.SimpleSolarPanel] = []
         self.rwPowerList: list[ReactionWheelPower.ReactionWheelPower] = []
         self.battery: Optional[simpleBattery.SimpleBattery] = None
         self.obcPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+
 
         # Persistent message handles exposed to FSW
         self.sc_state_out_msg: Optional[messaging.SCStatesMsg] = None
@@ -149,6 +157,7 @@ class BasiliskDynamicsModel:
         self._setup_solar_panels()
         self._setup_rw_effector()
         self._setup_thrusters()
+        self._setup_fuel_tank()
         self._setup_eps()
         self._setup_integrator()
         # self._setup_recorders()
@@ -162,11 +171,15 @@ class BasiliskDynamicsModel:
         for solarPanel in self.solarPanels:
             sim.AddModelToTask(self.dynTaskName, solarPanel, 20)
         sim.AddModelToTask(self.dynTaskName, self.rwEffector, 20)
+        sim.AddModelToTask(self.dynTaskName, self.thrusterEffector, 20)
+        sim.AddModelToTask(self.dynTaskName, self.fuelTankEffector, 20)
         sim.AddModelToTask(self.dynTaskName, self.battery, 20)
         sim.AddModelToTask(self.dynTaskName, self.obcPowerSink, 20)
         for rwPower in self.rwPowerList:
             sim.AddModelToTask(self.dynTaskName, rwPower, 20)
         
+
+
 
     ###########################
     # Public helper functions #
@@ -175,9 +188,16 @@ class BasiliskDynamicsModel:
     def connect_fsw(self, fsw: FswStack) -> None:
         """
         Connect the computed FSW RW torque to the RW effector
+        TODO: Connect the computed thrust to the thruster effector
         """
+        # Subscribe RWs to motor torque commands from the FSW 
         assert self.rwEffector is not None
         self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
+
+        # TODO: Uncomment once FSW has been expanded to output thruster commands
+        # # Subscribe thruster to firing commands from the FSW
+        # assert self.thrusterEffector is not None
+        # self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
 
 
 
@@ -471,44 +491,88 @@ class BasiliskDynamicsModel:
 
     def _setup_thrusters(self) -> None:
         """
-        TODO
-        Placeholder for future thruster/fuel system
+        Create and attach a custom-parameter thruster effector
+
+        This method sets the following attributes:
+            self.thrusterFactory (thrusterFactory)
+            self.thrusterEffector (ThrusterDynamicEffector)
         """
-        self.thrusterFactory = None
-        self.thrusterEffector = None
-        logging.debug(f"[{self.logTag}] Thruster subsystem not yet implemented. Coming soon...")
 
-        # location = [[0.0, 0.0, 0.0]]
-        # direction = [[0.0, 0.0, 1.0]]
+        # Create fresh factory and dynamics container
+        thrusterFactory = simIncludeThruster.thrusterFactory()
+        thrusterEffector = thrusterDynamicEffector.ThrusterDynamicEffector()
+        thrusterEffector.ModelTag = f"{self.scObj.ModelTag}_thrEff"
 
-        # # create the thruster devices by specifying the thruster type and its location and direction
-        # for pos_B, dir_B in zip(location, direction):
-        #     self.thrusterFactory.create('MOOG_Monarc_90HT', pos_B, dir_B, useMinPulseTime=False)
+        # Override custom parameters with existing Basilisk model
+        if self.cfg.thr_model_override in ACCEPTED_THRUSTER_MODELS:
+            thr_model = self.cfg.thr_model_override
+            thrusterFactory.create(
+                thrusterType = thr_model, 
+                r_B = self.cfg.thr_pos_B, 
+                tHat_B = self.cfg.thr_dir_B,
+                useMinPulseTime = False)
+        
+        # Use custom thruster parameters from config
+        else:
+            # Create one fully custom thruster using Blank_Thruster
+            thrusterFactory.create(
+                thrusterType="Blank_Thruster",
+                r_B = self.cfg.thr_pos_B,
+                tHat_B = self.cfg.thr_dir_B,
+                useMinPulseTime = self.cfg.use_min_pulse_time,
+                MinOnTime = self.cfg.min_pulse_time,
+                MaxThrust = self.cfg.max_thrust,
+                thrBlowDownCoeff = self.cfg.thrust_blowdown_coeff,
+                steadyIsp = self.cfg.steady_isp,
+                ispBlowDownCoeff = self.cfg.isp_blowdown_coeff,
+                areaNozzle = self.cfg.area_nozzle,
+                thrusterMagDisp = self.cfg.thr_mag_disp
+            )
 
-        # self.numThr = self.thrusterFactory.getNumOfDevices()
+        # Attach thruster set to spacecraft
+        thrusterFactory.addToSpacecraft(
+            thrusterEffector.ModelTag,
+            thrusterEffector,
+            self.scObj
+        )
 
-        # # create thruster object container and tie to spacecraft object
-        # self.thrusterFactory.addToSpacecraft("thrusterFactory", self.thrusterDynamicEffector, self.scObject)
+        # Assign attributes
+        self.thrusterFactory = thrusterFactory
+        self.thrusterEffector = thrusterEffector
+
+        logging.debug(f"[{self.logTag}] Thruster effector initialized for '{self.scObj.ModelTag}'")
 
 
     def _setup_fuel_tank(self) -> None:
         """
-        TODO
-        Placeholder for the future thruster/fuel system
+        TODO: Use custom parameters from config. Now it is just static
+
+        The method sets the attributes:
+            self.fuelTankModel (FuelTankModelUniformBurn)
+            self.fuelTankEffector (FuelTank)
         """
-        # # Define the tank
-        # self.tankModel = fuelTank.FuelTankModelUniformBurn()
-        # self.fuelTankStateEffector.setTankModel(self.tankModel)
-        # self.tankModel.propMassInit = 50.0
-        # self.tankModel.maxFuelMass = 75.0
-        # self.tankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
-        # self.fuelTankStateEffector.r_TB_B = [[0.0], [0.0], [0.0]]
-        # self.tankModel.radiusTankInit = 1
-        # self.tankModel.lengthTank = 1
+        # Initialize the fuel tank model and effector
+        fuelTankModel = fuelTank.FuelTankModelUniformBurn() # Cylindrical tank
+        fuelTankEffector = fuelTank.FuelTank()
+        fuelTankEffector.ModelTag = f"{self.scObj.ModelTag}_fuelEff"
         
-        # # Add the tank and connect the thrusters
-        # self.scObject.addStateEffector(self.fuelTankStateEffector)
-        # self.fuelTankStateEffector.addThrusterSet(self.thrusterDynamicEffector)
+        fuelTankEffector.setTankModel(fuelTankModel)
+        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.05 # [kg] fraction of the total satellite mass
+        fuelTankModel.propMassInit = fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
+        fuelTankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
+        fuelTankEffector.r_TB_B = [[0.0], [0.0], [0.0]]
+        fuelTankModel.radiusTankInit = 0.05 # [m] The tank kan only have 1/2 side length radius for a 6U sat
+        fuelTankModel.lengthTank = 0.2 # [m] The tank occupies ~2U of the satellite with V = 2pi x 0.05m x 0.2m
+        
+        # Add the tank and connect the thrusters
+        self.scObj.addStateEffector(fuelTankEffector)
+        fuelTankEffector.addThrusterSet(self.thrusterEffector)
+
+        # Assign attributes
+        self.fuelTankModel = fuelTankModel
+        self.fuelTankEffector = fuelTankEffector
+
+        logging.debug(f"[{self.logTag}] Fuel tank initialized for '{self.scObj.ModelTag}'")
 
 
     def _setup_eps(self) -> None:
