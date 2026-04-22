@@ -164,7 +164,7 @@ class MsisInputUpdater(sysModel.SysModel):
                 f"Missing {len(missing)} day(s); first missing: {missing[0]}, last missing: {missing[-1]}."
             )
 
-        logging.debug(f"[BSK] Space weather parameters has been parsed and loaded in range {load_start}..{load_end}")
+        logging.debug(f"[MSIS] Space weather parameters has been parsed and loaded in range {load_start}..{load_end}")
         return data
     
 
