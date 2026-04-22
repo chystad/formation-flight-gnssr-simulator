@@ -98,30 +98,30 @@ GROUND_STATIONS:
 
 # Electrical Power System parameters (same for all satellites) 
 EPS_PARAMETERS:
-  bat_storage_capacity: 5.0   # [Wh] Battery max storage capacity
+  bat_storage_capacity: 10.0   # [Wh] Battery max storage capacity
   init_bat_charge: 0.8        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
-  RW_base_draw: 5.0           # [W] Idle/baseline power consumption for each RW (> 0)
-  OBC_const_draw: 3.0         # [W] Constant OBC power consumption (> 0)
+  RW_base_draw: 1.0           # [W] Idle/baseline power consumption for each RW (> 0)
+  OBC_const_draw: 2.0         # [W] Constant OBC power consumption (> 0)
   solar_panels:
     p1:
       nHat_B: [0, 0, 1]     # Panel normal unit vec in body (B)
       panel_area: 0.18      # [m^2] Panel area (> 0)
-      panel_efficiency: 0.1 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
+      panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
     p2:
       nHat_B: [0, 1, 0]
       panel_area: 0.02
-      panel_efficiency: 0.1
+      panel_efficiency: 0.2
     p3:
       nHat_B: [0, 0, -1]
       panel_area: 0.06
-      panel_efficiency: 0.1
+      panel_efficiency: 0.2
 
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
 RW_PARAMETERS:
   RW_model: "JitterFullyCoupled"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
   spinUVecs: [[1., 0., 0.],   # Spin axis unit vector in Body frame [x_B, y_B, z_B]
-              [0., 1., 0.],     # (Then number of vectors also define the number of RWs)
+              [0., 1., 0.],   # (Then number of vectors also define the number of RWs)
               [0., 0., 1.]]
   init_rpm: 0.0               # [RPM] initial wheel speed
   max_rpm: 6000.0             # [RPM] max wheel angular velocity
@@ -138,7 +138,22 @@ RW_PARAMETERS:
 
 # Thruster parameters (same for all satellites)
 THRUSTER_PARAMETERS:
-  temp: false
+  thr_pos_B: [1., 0., 0.] # [m] vector with thruster location in B-frame components
+  thr_dir_B: [0., 0., 1.] # [-] Unit vector with thruster force direction
+
+  thr_model_override: "None" # ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
+                             # [WARNING] Chosing any of the above values OVERRIDES the thruster params under.
+                             # Any other string value will configure a 'Blank_Thruster' model with custom params.
+
+  use_min_pulse_time: false   # [-] Flag if the thruster model should use a minimum impulse time
+  min_pulse_time: 0.          # [s] Thruster minimum on time (Requires: use_min_pulse_time == true)
+  max_thrust: 5.              # [N] Maximum thruster force
+  thrust_blowdown_coeff: [0.] # [-] Vector with polynomial coefficients for fuel mass to thrust blow down model in descending order
+  steady_isp: 100.            # [s] Thruster specific impulse/fuel efficiency
+  isp_blowdown_coeff: [0.]    # [-] Vector with polynomial coefficients for fuel mass to Isp blow down model in descending order
+  area_nozzle: 0.02           # [m^2 ??] Thruster nozzle exhaust cone exit area
+  thr_mag_disp: 50.           # [% ??] thruster dispersion percentage
+
 
 # Magnetorquer parameters (same for all satellites)
 MTQ_PARAMETERS:
