@@ -84,11 +84,19 @@ class Config:
         betaStatic =            float(  d_cfg['RW_PARAMETERS']['betaStatic'])
         cViscous =              float(  d_cfg['RW_PARAMETERS']['cViscous'])
         
-        
-
         # Thruster parameters (same for all satellites)
-        temp =                  bool(   d_cfg['THRUSTER_PARAMETERS']['temp'])
-
+        thr_pos_B =                     d_cfg['THRUSTER_PARAMETERS']['thr_pos_B'] # list[float]
+        thr_dir_B =                     d_cfg['THRUSTER_PARAMETERS']['thr_dir_B'] # list[float]
+        thr_model_override =    str(    d_cfg['THRUSTER_PARAMETERS']['thr_model_override'])
+        use_min_pulse_time =    bool(   d_cfg['THRUSTER_PARAMETERS']['use_min_pulse_time'])
+        min_pulse_time =        float(  d_cfg['THRUSTER_PARAMETERS']['min_pulse_time'])
+        max_thrust =            float(  d_cfg['THRUSTER_PARAMETERS']['max_thrust'])
+        thrust_blowdown_coeff =         d_cfg['THRUSTER_PARAMETERS']['thrust_blowdown_coeff'] # list[float]
+        steady_isp =            float(  d_cfg['THRUSTER_PARAMETERS']['steady_isp'])
+        isp_blowdown_coeff =            d_cfg['THRUSTER_PARAMETERS']['isp_blowdown_coeff'] # list[float]
+        area_nozzle =           float(  d_cfg['THRUSTER_PARAMETERS']['area_nozzle'])
+        thr_mag_disp =          float(  d_cfg['THRUSTER_PARAMETERS']['thr_mag_disp'])
+        
         # Magnetorquer parameters (same for all satellites)
         temp =                  bool(   d_cfg['MTQ_PARAMETERS']['temp'])
         
@@ -113,6 +121,21 @@ class Config:
         self.validate_rw_parameters(
             RW_model, 
             spinUVecs
+        )
+
+        # TODO Validate Thruster parameters
+        self.validate_thruster_parameters(
+            thr_pos_B,
+            thr_dir_B,
+            thr_model_override,
+            use_min_pulse_time,
+            min_pulse_time,
+            max_thrust,
+            thrust_blowdown_coeff,
+            steady_isp,
+            isp_blowdown_coeff,
+            area_nozzle,
+            thr_mag_disp
         )
 
         # Validate EPS parameters (except solar panel parameters. These are validated in 'generate_solar_panel_instances_from_config')
@@ -181,8 +204,18 @@ class Config:
         self.betaStatic: float = betaStatic
         self.cViscous: float = cViscous
 
-        # TODO: Thruster parameters
-        self.temp: bool = temp
+        # Thruster parameters
+        self.thr_pos_B: list[float] = thr_pos_B
+        self.thr_dir_B: list[float] = thr_dir_B
+        self.thr_model_override: str = thr_model_override
+        self.use_min_pulse_time: bool = use_min_pulse_time
+        self.min_pulse_time: float = min_pulse_time
+        self.max_thrust: float = max_thrust
+        self.thrust_blowdown_coeff: list[float] = thrust_blowdown_coeff
+        self.steady_isp: float = steady_isp
+        self.isp_blowdown_coeff: list[float] = isp_blowdown_coeff
+        self.area_nozzle: float = area_nozzle
+        self.thr_mag_disp: float = thr_mag_disp
 
         # TODO: MTQ parameters
         self.temo: bool = temp
@@ -677,6 +710,28 @@ class Config:
                              f"Got '{type(spinUVecs)}', expected 'list[list[float]]'")
         
     
+    def validate_thruster_parameters(self,
+                                     thr_pos_B: list,
+                                     thr_dir_B: list,
+                                     thr_model_override: str,
+                                     use_min_pulse_time: bool,
+                                     min_pulse_time: float,
+                                     max_thrust: float,
+                                     thrust_blowdown_coeff: list[float],
+                                     steady_isp: float,
+                                     isp_blowdown_coeff: list[float],
+                                     area_nozzle: float,
+                                     thr_mag_disp: float
+                                     ) -> None:
+        """
+        TODO
+        Validate all thruster parameter inputs to ensure correct type and value. 
+        Raise ValueError if incorrect type or value is detected
+        """
+        accepted_model_overrides = ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
+        pass
+
+
     def validate_eps_parameters(self,
                                 bat_storage_capacity: float,
                                 init_bat_charge: float,
