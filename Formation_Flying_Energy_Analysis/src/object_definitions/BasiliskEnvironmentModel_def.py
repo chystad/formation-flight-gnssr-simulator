@@ -49,23 +49,20 @@ class BasiliskEnvironmentModel:
     Initialize, schedule and store all shared environment-models
 
     All environment models initialized, and their place in the BasiliskSimulator process/task architecture:
-    BasiliskSimulator <SimulationBaseClass>
+    BasiliskSimulator
     |
-    |---EnvironmentProcess <Process>
+    |---EnvironmentProcess
         |
-        |---EnvironmentTask <Task>
+        |---EnvironmentTask
             |
-            |---spiceObj <Model>
-            |
-            |---eclipseObj <Model>
-            |
-            |---groundStations <Model(s)>
-            |
-            |---atmObj *Optional* <Model>
+            |---spiceObj
+            |---eclipseObj
+            |---groundStation(s) 
+            |---atmObj           (optional)
         |
-        |---MsisInputUpdaterTask *Optional* <Task>
+        |---MsisInputUpdaterTask (optional)
             |
-            |---msisInputUpdater *Optional* <Model> 
+            |---msisInputUpdater (optional)
     """
     def __init__(self, 
                  sim: BasiliskSimulator,
