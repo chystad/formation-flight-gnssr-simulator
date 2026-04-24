@@ -1,7 +1,11 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import os
 import csv
 import logging
 import numpy as np
+from numpy.typing import NDArray
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -14,6 +18,10 @@ from Basilisk.simulation import simpleNav
 
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
+if TYPE_CHECKING:
+    # This is done to prevent the "low-level" environmental models being dependent 
+    # on the "high-level" orchestrator
+    from object_definitions.BasiliskSimulator_def import BasiliskSimulator 
 
 LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
@@ -34,53 +42,55 @@ class PointingMode(str, Enum):
     COMMS = "comms"
     CHARGE = "charge"
     CAPTURE = "capture"
+    FORM_CAPTURE = "form_capture" # TODO: Placeholder mode for when
     EMERGENCY = "emergency"
     ERROR = "error"
 
 
-class FswStack(sysModel.SysModel):
+class _FswStackScheduler(sysModel.SysModel):
     """
-    One-per-spacecraft RW flight-software "stack" wrapped in a single SysModel so it can be scheduled
-    as one model inside a dedicated FSW task.
+    Small Basilisk-scheduled adapter.
 
-    Internal order each UpdateState:
-        1) SimpleNav
-        2) Guidance (inertial3D)
-        3) Tracking error (attTrackingError)
-        4) Control law (mrpFeedback)
-        5) Torque mapping (rwMotorTorque)
+    FswStack itself is a plain owner class, like BasiliskDynamicsModel.
+    This object is the scheduled SysModel that calls back into FswStack.
+    """
+    def __init__(self, owner: "FswStack", sat_idx: int):
+        super().__init__()
+        self.owner = owner
+        self.ModelTag = f"FswStackScheduler_{sat_idx}"
 
-    Exposed outputs (message handles):
-        - rwMotorTorqueOutMsg 
-        - attGuidOutMsg         
-        - cmdTorqueOutMsg  
-        - navAttOutMsg / navTransOutMsg 
+    def UpdateState(self, CurrentSimNanos: int) -> None:
+        self.owner._update_state(CurrentSimNanos)
 
-    =========================================================================================================
-    ATTRIBUTES:
-        modelTag            (str) Name of FswStack instance
-        pointingMode        (PointingMode) State describing the current pointing objective
-        gsAccessMsgs        (list[AccessMsg]) Access msgs for the satellite against all ground stations
-        gsPosMsgs           (list[GroundStateMsg]) Contain 'r_LN_N' describing the GS position vector relative to inertial frame origin in inertial coordinates.
-        sunEclipseMsg       (EclipseMsgPayload) Contains 'shadowFactor' property used to evaluate Sun illumination on the SC
-        nav                 (SimpleNav) 
-        guid                (inertial3D)
-        att_err             (attTrackingErr)
-        ctrl                (mrpFeedback) 
-        rw_map              (rwMotorTorque)
-        rwMotorTorqueOutMsg (rwMotorTorqueOutMsg)
-        attGuidOutMsg       (attGuidOutMsg)
-        cmdTorqueOutMsg     (cmdTorqueOutMsg)
-        navAttOutMsg        (navAttOutMsg)
-        navTransOutMsg      (navTransOutMsg)
+    def SelfInit(self):
+        self.owner._self_init()
 
-        _vc_msg         (VehicleConfigMsg) Vehicle configuration message. Hub inertia.
-    =========================================================================================================
+    def CrossInit(self):
+        self.owner._cross_init()
 
+    def Reset(self, CurrentSimNanos: int):
+        self.owner._reset(CurrentSimNanos)
+
+
+class FswStack():
+    """
+    Plain owner/manager class for one spacecraft's FSW stack.
+
+    Owns:
+        - SimpleNav
+        - inertial3D guidance
+        - attTrackingError
+        - mrpFeedback
+        - rwMotorTorque
+        - mode-switching logic
+
+    Schedules:
+        - one internal _FswStackScheduler SysModel on FswTask_<sat_idx>
     """
 
     def __init__(
         self,
+        sim: BasiliskSimulator,
         sat: Satellite,
         sat_idx: int,
         sc_state_out_msg: messaging.SCStatesMsg,
@@ -91,48 +101,44 @@ class FswStack(sysModel.SysModel):
         gs_state_msgs: list[messaging.GroundStateMsg],
         sun_eclipse_msg: messaging.EclipseMsg,
         sun_state_msg: messaging.SpicePlanetStateMsg,
-        log_timestamp: str
+        log_timestamp: str,
     ):
-        """
-        Args:
-            sat (Satellite): current Satellite instance
-            sat_idx (int): Satellite iteration number
-            sc_state_out_msg (messaging.SCStatesMsg): Sc position and velpcity in inerital frame
-            rw_speed_out_msg (messaging.RWSpeedMsg): The angular speeds of all RWs in the SC's RW cluster
-            rw_config_msg (messaging.RWArrayConfigMsg): Desciption of how the SC's RW cluster is defined
-            gs_access_msgs (list[messaging.AccessMsg]): List containing the SC's access to all GSs.
-                Ex: gs_access_msgs[0] will contain the boolean value describing if the spacecraft is within GS[0]'s LOS.
-    
-        """
-        super().__init__()
+        self.sim = sim
+        self.sat = sat
+        self.sat_idx = sat_idx
 
-        # self.sim = sim
         self.ModelTag = f"RwFswStack{sat_idx}"
-        self.LogTag = f"FSW{sat_idx}"
+        self.logTag = f"FSW{sat_idx}"
+
+        # -------------------------------------------------
+        # Create FSW task inside the owner, like DynamicsModel
+        # -------------------------------------------------
+        assert sim.fswProcesses[sat_idx] is not None
+        self.fswTaskName = f"FswTask_{sat_idx}"
+        sim.fswProcesses[sat_idx].addTask(sim.CreateNewTask(self.fswTaskName, sim.fswRateNanos)) # type: ignore
+
+        # -------------------------------------------------
+        # Existing persistent state
+        # -------------------------------------------------
         self.pointingMode = PointingMode.COAST
         self.batStateMsg = bat_state_msg
         self.gsAccessMsgs = gs_access_msgs
         self.gsStateMsgs = gs_state_msgs
-        self.selectedGsIdx: Optional[int] = None 
+        self.selectedGsIdx: Optional[int] = None
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
         self.logTimestamp = log_timestamp
 
-        # Keep track of the last time COMMS was exited (last commuication attempt was completed)
         self.lastCommsNanos = 0
 
-        ## temp
         self.oldSunEclipseMsgShadowFactor = None
-        self.prevGsPosPrintHours = 0.
-        ##
+        self.prevGsPosPrintHours = 0.0
 
-        # Initialize mode switching log
         self._log_mode_switching_logic(write_header_only=True)
-        
 
-        # ----------------------------
+        # -------------------------------------------------
         # Internal FSW modules
-        # ----------------------------
+        # -------------------------------------------------
         self.nav = simpleNav.SimpleNav()
         self.nav.ModelTag = f"SimpleNavigation_{sat_idx}"
 
@@ -148,33 +154,29 @@ class FswStack(sysModel.SysModel):
         self.rw_map = rwMotorTorque.rwMotorTorque()
         self.rw_map.ModelTag = f"rwMotorTorque_{sat_idx}"
 
-        # ----------------------------
+        # -------------------------------------------------
         # Guidance configuration
-        # ----------------------------
-        # set the desired inertial orientation using Modified Rodrigues Parameterization (MRP)
+        # -------------------------------------------------
         self.guid.sigma_R0N = [0.0, 0.0, 0.0]
 
-        # ----------------------------
+        # -------------------------------------------------
         # RW mapping configuration
-        # ----------------------------
-        # Identity (control 3 body axes)
-        control_axes_B: list[int] = [1, 0, 0,
-                                     0, 1, 0,
-                                     0, 0, 1]
-        self.rw_map.controlAxes_B = control_axes_B
+        # -------------------------------------------------
+        self.rw_map.controlAxes_B = [
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1,
+        ]
 
-        # ----------------------------
-        # Vehicle config msg (inertia)
-        # ----------------------------
-        # create the FSW vehicle configuration message
-        # use the same inertia in the FSW algorithm as in the simulation
+        # -------------------------------------------------
+        # Vehicle config msg
+        # -------------------------------------------------
         vehicle_config_out = messaging.VehicleConfigMsgPayload(ISCPntB_B=sat.I_B)
         self._vc_msg = messaging.VehicleConfigMsg().write(vehicle_config_out)
 
-        # ----------------------------
+        # -------------------------------------------------
         # Controller gains
-        # ----------------------------
-        # Defaults match your BasiliskSimulator_def.py constants; override via args if desired.
+        # -------------------------------------------------
         self.ctrl.K = MRP_K
         self.ctrl.P = MRP_P
         self.ctrl.Ki = MRP_KI
@@ -182,83 +184,51 @@ class FswStack(sysModel.SysModel):
         if self.ctrl.Ki > 0:
             self.ctrl.integralLimit = 2.0 / self.ctrl.Ki * 0.1
 
-        # ----------------------------
-        # Message wiring (subscriptions)
-        # ----------------------------
-        # Nav reads truth state
+        # -------------------------------------------------
+        # Message wiring
+        # -------------------------------------------------
         self.nav.scStateInMsg.subscribeTo(sc_state_out_msg)
 
-        # Tracking error compares nav vs reference
         self.att_err.attNavInMsg.subscribeTo(self.nav.attOutMsg)
         self.att_err.attRefInMsg.subscribeTo(self.guid.attRefOutMsg)
 
-        # Controller reads guidance error + vehicle inertia + RW params + RW speeds
         self.ctrl.guidInMsg.subscribeTo(self.att_err.attGuidOutMsg)
         self.ctrl.vehConfigInMsg.subscribeTo(self._vc_msg)
         self.ctrl.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.ctrl.rwSpeedsInMsg.subscribeTo(rw_speed_out_msg)
 
-        # RW mapping reads RW params + commanded body torque
         self.rw_map.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.rw_map.vehControlInMsg.subscribeTo(self.ctrl.cmdTorqueOutMsg)
 
-        # ----------------------------
-        # Exposed outputs (for wiring/logging in BasiliskSimulator_def)
-        # ----------------------------
+        # -------------------------------------------------
+        # Exposed outputs
+        # -------------------------------------------------
         self.rwMotorTorqueOutMsg = self.rw_map.rwMotorTorqueOutMsg
         self.attGuidOutMsg = self.att_err.attGuidOutMsg
         self.cmdTorqueOutMsg = self.ctrl.cmdTorqueOutMsg
         self.navAttOutMsg = self.nav.attOutMsg
         self.navTransOutMsg = self.nav.transOutMsg
 
-        # ----------------------------
-        # Flags used for debugging and testing
-        # ---------------------------
-        self.changed_pointing_obj: bool = False
+        self.changed_pointing_obj = False
 
-        logging.debug(f"[{self.LogTag}] Created RW FSW stack for satellite {sat_idx}")
+        # -------------------------------------------------
+        # Scheduled adapter
+        # -------------------------------------------------
+        self.scheduler = _FswStackScheduler(self, sat_idx)
+        sim.AddModelToTask(self.fswTaskName, self.scheduler, 20)
+
+        logging.debug(f"[{self.logTag}] Created FSW stack for satellite {sat_idx}")
 
 
-    def UpdateState(self, CurrentSimNanos: int) -> None:
+    def _modules(self):
+        return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
+
+
+    def _update_state(self, CurrentSimNanos: int) -> None:
         """
-        Update all states
+        Same functionality as old UpdateState(), but FswStack is no longer
+        itself the scheduled SysModel.
         """
-        # Order matters: nav -> guidance -> error -> control -> mapping
-        
-        # # [TEST] Perform a 180 deg flip maneuver after 2.5 minutes
-        # if not self.changed_pointing_obj and (CurrentSimNanos*macros.NANO2MIN > 2.5):
-        #     self.guid.sigma_R0N = [0.0, 0.0, 1.0]
-        #     self.changed_pointing_obj = True
-
-
-        # ========== [TEST] ========== #
-        # shadowFac = self.sunEclipseMsg.read().shadowFactor
-
-        # if shadowFac != self.oldSunEclipseMsgShadowFactor:
-        #     print(f"new eclipse state: {shadowFac} " 
-        #           f"@: {CurrentSimNanos*macros.NANO2MIN}")
-            
-        # self.oldSunEclipseMsgShadowFactor = shadowFac
-        # ============================ #
-
-
-        # ========== [GroundLocation position in N] ========== #
-        # timeBetweenGsPosPrintsHours = 0.8
-        # if (self.prevGsPosPrintHours + timeBetweenGsPosPrintsHours) <= CurrentSimNanos*macros.NANO2HOUR or (CurrentSimNanos == 0):
-            
-        #     for i, gs in enumerate(self.gsStateMsgs):
-        #         gsPos = gs.read().r_LN_N
-
-        #         print(gsPos)
-        #         print(np.linalg.norm(gsPos))
-
-        #         self.prevGsPosPrintHours = CurrentSimNanos*macros.NANO2HOUR
-
-        # Conclusion from this little experiment: The Basilisk inerital frame (N) is an ECI frame. 
-        # The vector describing the ground locations change with time -> Not ECEF!!
-
-        # ==================================================== #
-        
         self.nav.UpdateState(CurrentSimNanos)
         self._eval_pointing_mode(CurrentSimNanos)
         self._guidance(CurrentSimNanos)
@@ -267,196 +237,183 @@ class FswStack(sysModel.SysModel):
         self.ctrl.UpdateState(CurrentSimNanos)
         self.rw_map.UpdateState(CurrentSimNanos)
 
-    def SelfInit(self):
-        # called by Basilisk during InitializeSimulation()
+
+    def _self_init(self):
         for m in self._modules():
             if hasattr(m, "SelfInit"):
                 m.SelfInit()
 
-    def CrossInit(self):
-        # some modules use cross-init to resolve message interfaces
+
+    def _cross_init(self):
         for m in self._modules():
             if hasattr(m, "CrossInit"):
                 m.CrossInit()
 
-    def Reset(self, CurrentSimNanos: int):
-        # called by Basilisk during InitializeSimulation()
+
+    def _reset(self, CurrentSimNanos: int):
         for m in self._modules():
             if hasattr(m, "Reset"):
                 m.Reset(CurrentSimNanos)
 
-    def _modules(self):
-        return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
-
-
-    def _guidance(self, CurrentSimNanos: int) -> None:
+    
+    def _coast_desired_att(self) -> NDArray[np.float64]:
         """
-        Updates the desired MRP oerientation 'self.guid.sigma_R0N' based on the current pointing mode
+        Point solar panels towards Sun (even though the Earth eclipses the Sun), and try to achieve NADIR antenna pointing
         """
-        self.guid.sigma_R0N = [0.0, 0.0, 1.0]
+        # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+        #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
 
-        # TODO: Compute and apply the actual correct pointing orientation based on the current pointingMode
-        match self.pointingMode:
-            case PointingMode.COAST:
-                """
-                Point solar panels towards Sun (even though the Earth eclipses the Sun), and try to achieve NADIR antenna pointing
-                """
-                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
-                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+        # Get spacecraft position relative to Earth in inertial frame 
+        r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+        r_NB_N = - r_BN_N
+        r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
 
-                # Get spacecraft position relative to Earth in inertial frame 
-                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
-                r_NB_N = - r_BN_N
-                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+        # Get Sun position vector relative to the Earth in inertial frame
+        r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
 
-                # Get Sun position vector relative to the Earth in inertial frame
-                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+        # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+        r_SB_N = r_SN_N - r_BN_N
+        r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
 
-                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
-                r_SB_N = r_SN_N - r_BN_N
-                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+        # Want antenna to point nadir as much as possible
+        a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+        a_hat = a / np.linalg.norm(a)
+        
+        z_hat = r_SB_N_hat
+        y_hat = a_hat
+        x_hat = np.cross(y_hat, z_hat)
+        z_hat = np.cross(x_hat, y_hat)
 
-                # Want antenna to point nadir as much as possible
-                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
-                a_hat = a / np.linalg.norm(a)
-                
-                z_hat = r_SB_N_hat
-                y_hat = a_hat
-                x_hat = np.cross(y_hat, z_hat)
-                z_hat = np.cross(x_hat, y_hat)
+        # Direction cosine matrix for the desired attitude
+        C_DN_N = np.vstack((x_hat, y_hat, z_hat))
 
-                # Direction cosine matrix for the desired attitude
-                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+        # Convert into desired Modified Rodrigues Parameters
+        mrp_D = rbk.C2MRP(C_DN_N)
 
-                # Convert into desired Modified Rodrigues Parameters
-                mrp_D = rbk.C2MRP(C_DN_N)
-                
-                # Publish the desired attitude
-                self.guid.sigma_R0N = mrp_D
+        return mrp_D
+    
 
-            
-            case PointingMode.COMMS:
-                """
-                Point antenna towards available ground station, and try to point solar panels towards the sun
-                """
-                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
-                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+    def _comms_desired_att(self) -> NDArray[np.float64]:
+        """
+        Point antenna towards available ground station, and try to point solar panels towards the sun
+        """
+        # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+        #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
 
-                # Get the available GS position relative to Earth in inertial frame
-                assert self.selectedGsIdx is not None
-                r_LN_N = np.array(self.gsStateMsgs[self.selectedGsIdx].read().r_LN_N)
+        # Get the available GS position relative to Earth in inertial frame
+        assert self.selectedGsIdx is not None
+        r_LN_N = np.array(self.gsStateMsgs[self.selectedGsIdx].read().r_LN_N)
 
-                # Get spacecraft position relative to Earth in inertial frame 
-                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
-                
-                # Unit vector from spacecraft Body to selected ground station (desired antenna direction)
-                r_LB_N = r_LN_N - r_BN_N
-                r_LB_N_hat = r_LB_N / np.linalg.norm(r_LB_N)
+        # Get spacecraft position relative to Earth in inertial frame 
+        r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+        
+        # Unit vector from spacecraft Body to selected ground station (desired antenna direction)
+        r_LB_N = r_LN_N - r_BN_N
+        r_LB_N_hat = r_LB_N / np.linalg.norm(r_LB_N)
 
-                # Get Sun position vector relative to the Earth in inertial frame
-                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+        # Get Sun position vector relative to the Earth in inertial frame
+        r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
 
-                # Unit vector from spacecraft Body to the Sun (sun vector)
-                r_SB_N = r_SN_N - r_BN_N
-                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+        # Unit vector from spacecraft Body to the Sun (sun vector)
+        r_SB_N = r_SN_N - r_BN_N
+        r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
 
-                # Project the sun vector into the plane normal to the desired antenna direction vector)
-                # https://www.maplesoft.com/support/help/Maple/view.aspx?path=MathApps/ProjectionOfVectorOntoPlane
-                s = r_SB_N_hat - np.dot(r_SB_N_hat, r_LB_N_hat)/np.linalg.norm(r_LB_N_hat)**2 * r_LB_N_hat
-                s_hat = s / np.linalg.norm(s)
+        # Project the sun vector into the plane normal to the desired antenna direction vector)
+        # https://www.maplesoft.com/support/help/Maple/view.aspx?path=MathApps/ProjectionOfVectorOntoPlane
+        s = r_SB_N_hat - np.dot(r_SB_N_hat, r_LB_N_hat)/np.linalg.norm(r_LB_N_hat)**2 * r_LB_N_hat
+        s_hat = s / np.linalg.norm(s)
 
-                # TODO: Make flexible for other solar panel / antenna face configurations
-                y_hat = r_LB_N_hat
-                z_hat = s_hat
-                x_hat = np.cross(y_hat, z_hat)
-                z_hat = np.cross(x_hat, y_hat)
+        # TODO: Make flexible for other solar panel / antenna face configurations
+        y_hat = r_LB_N_hat
+        z_hat = s_hat
+        x_hat = np.cross(y_hat, z_hat)
+        z_hat = np.cross(x_hat, y_hat)
 
-                # Direction cosine matrix for the desired attitude
-                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+        # Direction cosine matrix for the desired attitude
+        C_DN_N = np.vstack((x_hat, y_hat, z_hat))
 
-                # Convert into desired Modified Rodrigues Parameters
-                mrp_D = rbk.C2MRP(C_DN_N)
-                
-                # Publish the desired attitude
-                self.guid.sigma_R0N = mrp_D
+        # Convert into desired Modified Rodrigues Parameters
+        mrp_D = rbk.C2MRP(C_DN_N)
 
+        return mrp_D
+    
 
-            case PointingMode.CHARGE:
-                """
-                Point solar panels towards Sun, and try to achieve NADIR antenna pointing
-                """
-                # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
-                #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
+    def _charge_desired_att(self) -> NDArray[np.float64]:
+        """
+        Point solar panels towards Sun, and try to achieve NADIR antenna pointing
+        """
+        # TODO: Right now, it is hard-coded that solar panals are at the Z+ face, and the antenna at Y+ face
+        #       Make use of 'r_BP_B' and 'r_BA_B' in config to assign this dynamically. 
 
-                # Get spacecraft position relative to Earth in inertial frame 
-                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
-                r_NB_N = - r_BN_N
-                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+        # Get spacecraft position relative to Earth in inertial frame 
+        r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+        r_NB_N = - r_BN_N
+        r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
 
-                # Get Sun position vector relative to the Earth in inertial frame
-                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+        # Get Sun position vector relative to the Earth in inertial frame
+        r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
 
-                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
-                r_SB_N = r_SN_N - r_BN_N
-                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+        # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+        r_SB_N = r_SN_N - r_BN_N
+        r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
 
-                # Want antenna to point nadir as much as possible
-                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
-                a_hat = a / np.linalg.norm(a)
-                
-                z_hat = r_SB_N_hat
-                y_hat = a_hat
-                x_hat = np.cross(y_hat, z_hat)
-                z_hat = np.cross(x_hat, y_hat)
+        # Want antenna to point nadir as much as possible
+        a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+        a_hat = a / np.linalg.norm(a)
+        
+        z_hat = r_SB_N_hat
+        y_hat = a_hat
+        x_hat = np.cross(y_hat, z_hat)
+        z_hat = np.cross(x_hat, y_hat)
 
-                # Direction cosine matrix for the desired attitude
-                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+        # Direction cosine matrix for the desired attitude
+        C_DN_N = np.vstack((x_hat, y_hat, z_hat))
 
-                # Convert into desired Modified Rodrigues Parameters
-                mrp_D = rbk.C2MRP(C_DN_N)
-                
-                # Publish the desired attitude
-                self.guid.sigma_R0N = mrp_D
+        # Convert into desired Modified Rodrigues Parameters
+        mrp_D = rbk.C2MRP(C_DN_N)
+
+        return mrp_D
 
 
-            case PointingMode.EMERGENCY:
-                # TODO: Turn off power consumption from RWs 
-                # NOTE: Right now, same as CHARGE
-
-                # Get spacecraft position relative to Earth in inertial frame 
-                r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
-                r_NB_N = - r_BN_N
-                r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
-
-                # Get Sun position vector relative to the Earth in inertial frame
-                r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
-
-                # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
-                r_SB_N = r_SN_N - r_BN_N
-                r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
-
-                # Want antenna to point nadir as much as possible
-                a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
-                a_hat = a / np.linalg.norm(a)
-                
-                z_hat = r_SB_N_hat
-                y_hat = a_hat
-                x_hat = np.cross(y_hat, z_hat)
-                z_hat = np.cross(x_hat, y_hat)
-
-                # Direction cosine matrix for the desired attitude
-                C_DN_N = np.vstack((x_hat, y_hat, z_hat))
-
-                # Convert into desired Modified Rodrigues Parameters
-                mrp_D = rbk.C2MRP(C_DN_N)
-                
-                # Publish the desired attitude
-                self.guid.sigma_R0N = mrp_D
+    def _capture_desired_att(self) -> NDArray[np.float64]:
+        """
+        TODO
+        """
+        return np.array([0., 0., 1.])
 
 
-            case _:
-                logging.debug(f"[{self.LogTag}] Undefined pointing mode '{self.pointingMode}' reached in {self.ModelTag}")
-                raise ValueError("")
+    def _emergency_desired_att(self) -> NDArray[np.float64]:
+        # TODO: Turn off power consumption from RWs 
+        # NOTE: Right now, same as CHARGE
+
+        # Get spacecraft position relative to Earth in inertial frame 
+        r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+        r_NB_N = - r_BN_N
+        r_NB_N_hat = r_NB_N / np.linalg.norm(r_NB_N)
+
+        # Get Sun position vector relative to the Earth in inertial frame
+        r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+        # Unit vector from spacecraft Body to the Sun (desired solar panel direction)
+        r_SB_N = r_SN_N - r_BN_N
+        r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+        # Want antenna to point nadir as much as possible
+        a = r_NB_N_hat - np.dot(r_NB_N_hat, r_SB_N_hat)/np.linalg.norm(r_SB_N_hat)**2 * r_SB_N_hat
+        a_hat = a / np.linalg.norm(a)
+        
+        z_hat = r_SB_N_hat
+        y_hat = a_hat
+        x_hat = np.cross(y_hat, z_hat)
+        z_hat = np.cross(x_hat, y_hat)
+
+        # Direction cosine matrix for the desired attitude
+        C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+        # Convert into desired Modified Rodrigues Parameters
+        mrp_D = rbk.C2MRP(C_DN_N)
+        
+        return mrp_D
         
     
     def _eval_pointing_mode(self, CurrentSimNanos: int) -> None:
@@ -587,19 +544,14 @@ class FswStack(sysModel.SysModel):
 
         self.pointingMode = nextMode
         
-        
-
-
-
-        # # OLD MODE SWITCHING LOGIC
-        # if canCom:
-        #     self.pointingMode = PointingMode.COMMS
-        # elif canChar:
-        #     self.pointingMode = PointingMode.CHARGE
-        # else:
-        #     self.pointingMode = PointingMode.COAST
-        
+        # Create log entry if pointing mode changes
         if old_pointing_mode != self.pointingMode:
+            # Update self.lastCommsNanos
+            if old_pointing_mode == PointingMode.COMMS:
+                self.lastCommsNanos = CurrentSimNanos
+                hoursSinceLastComms = 0.
+            
+            
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
             self._log_mode_switching_logic(
                 currentSimMins=currentSimMins,
@@ -616,7 +568,35 @@ class FswStack(sysModel.SysModel):
                 maxNoCom=maxNoCom,
                 emergencyExitFlag=exitEmergencyFlag,
             )
+    
+    
+    def _guidance(self, CurrentSimNanos: int) -> None:
+        """
+        Updates the desired MRP oerientation 'self.guid.sigma_R0N' based on the current pointing mode
+        """
+        self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
+        # TODO: Compute and apply the actual correct pointing orientation based on the current pointingMode
+        match self.pointingMode:
+            case PointingMode.COAST:
+                self.guid.sigma_R0N = self._coast_desired_att()
+  
+            case PointingMode.COMMS:
+                self.guid.sigma_R0N = self._comms_desired_att()
+
+            case PointingMode.CHARGE:
+                self.guid.sigma_R0N = self._charge_desired_att()
+
+            case PointingMode.CAPTURE:
+                self.guid.sigma_R0N = self._capture_desired_att()
+
+            case PointingMode.EMERGENCY:
+                self.guid.sigma_R0N = self._emergency_desired_att()
+
+            case _:
+                logging.debug(f"[{self.logTag}] Undefined pointing mode '{self.pointingMode}' reached in {self.ModelTag}")
+                raise ValueError("")
+        
     
     def _log_mode_switching_logic(
         self,
@@ -643,7 +623,7 @@ class FswStack(sysModel.SysModel):
         # Ensure the log directory exists
         LOG_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
         
-        filename = f"{self.logTimestamp}_{self.LogTag}_mode_switching_logic.csv"
+        filename = f"{self.logTimestamp}_{self.logTag}_mode_switching_logic.csv"
 
         filepath = LOG_DATA_SAVE_DIR / filename
 
@@ -688,7 +668,7 @@ class FswStack(sysModel.SysModel):
 
             if not file_exists:
                 writer.writerow(header)
-                logging.debug(f"[{self.LogTag}] Mode switching log created for {self.ModelTag}")
+                logging.debug(f"[{self.logTag}] Mode switching log created for {self.ModelTag}")
 
             if write_header_only:
                 return
