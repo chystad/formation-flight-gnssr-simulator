@@ -1,20 +1,20 @@
-# BasiliskSimulator_def.py
 #
-# Scenario/orchestrator layer for the multi-satellite Basilisk simulation.
+#  ISC License
 #
-# Intended architecture:
-#   - BasiliskSimulator               -> scenario orchestrator
-#   - BasiliskEnvironmentalModels     -> shared environment models (1 instance)
-#   - BasiliskDynamicModels           -> per-spacecraft plant/dynamics (1 instance per satellite)
-#   - FswStack                        -> per-spacecraft flight software stack (1 instance per satellite)
+#  Copyright (c) 2021, Autonomous Vehicle Systems Lab, University of Colorado at Boulder
 #
-# This file is intentionally written to be compatible with the planned rewrites of:
-#   * BasiliskEnvironmentalModels_def.py
-#   * BasiliskDynamicModels_def.py
-#   * FswStack_def.py
+#  Permission to use, copy, modify, and/or distribute this software for any
+#  purpose with or without fee is hereby granted, provided that the above
+#  copyright notice and this permission notice appear in all copies.
 #
-# The code below uses a few interface adapter helpers so the other files can evolve
-# without forcing you to rewrite the orchestrator again.
+#  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+#  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+#  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+#  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+#  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+#  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
 
 from __future__ import annotations
 
@@ -44,6 +44,10 @@ DYN_RATE: float = 0.5 # Update rate for dynamical models
 FSW_RATE: float = 0.5 # Update rate for flight software stack
 REL_NAV_RATE: float = 0.5 # TODO: Update rate for the formation flight stack 
 MSIS_RATE: float = 30. # Update rate for MSIS input parameters
+
+TRANS_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
+ATT_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
+POWER_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
 
 
 class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
@@ -76,21 +80,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
     
         
-        integrators         (list[svIntegrators.Any]) List containing the numerical integrator used
-                                to propagate each spacecraft's states 
-        simTaskName         (str) Simulation task name 
-        scSim               (SimBaseClass) Simulation module container
-        dynProcess          (ProcessBaseClass) Simulation process 
-        scObjects           (list[Spacecraft]) List containing all simulation objects
-        scRecorders         (list[]) List containing all simulation recorders (one for each scObject)
-        msisInputUpdater    (MsisInputUpdater(SysModel)) Separate task for updating 
-                                MSIS input parameters during simulation execution
-        
-        spaceWeatherData    (Dict[date, SpaceWeatherDay]) Contains space weather parameters 
-                                from date(cfg.startTime-81days) to date(cfg.startTime + simulationDuration hours)
-        sim_data            (Optional[SimData]) Object containing the simulaton output data 
-        
-
+       
     Process-Task-Structure:
 
     BasiliskSimulator
@@ -151,6 +141,10 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswRateNanos: int =    macros.sec2nano(FSW_RATE)
         self.relNavRateNanos: int = macros.sec2nano(REL_NAV_RATE)
         self.msisRateNanos: int =   macros.sec2nano(MSIS_RATE)
+
+        self.transSampleRateNanos: int = macros.sec2nano(TRANS_SAMPLE_RATE)
+        self.attSampleRateNanos: int   = macros.sec2nano(ATT_SAMPLE_RATE)
+        self.powerSampleRateNanos: int = macros.sec2nano(POWER_SAMPLE_RATE)
         
         self.spiceTime = self._to_spice_utc(self.cfg.startTime) # Used to initialize SPICE interface
         self.epoch_msg: messaging.EpochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime) # Used for time-dependent models (SPICE interface (eclipse model by extension), MSIS)
@@ -346,6 +340,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswProcesses[sat_idx] = self.CreateNewProcess(fswProcessName)
 
         fsw = FswStack(
+            sim = self,
             sat = sat,
             sat_idx = sat_idx,
             sc_state_out_msg = dynModel.sc_state_out_msg,
@@ -359,12 +354,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             log_timestamp = self.cfg.timestamp_str
         )
         dynModel.connect_fsw(fsw)
-
-        # Create FSW task as part of the FSW process, and add the FSW SysModel
-        assert self.fswProcesses[sat_idx] is not None
-        fswTaskName = f"FswTask_{sat_idx}"
-        self.fswProcesses[sat_idx].addTask(self.CreateNewTask(fswTaskName, self.fswRateNanos)) # type: ignore
-        self.AddModelToTask(fswTaskName, fsw)
 
         return fsw
 
