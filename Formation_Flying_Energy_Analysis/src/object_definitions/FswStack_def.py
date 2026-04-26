@@ -8,13 +8,15 @@ import numpy as np
 from numpy.typing import NDArray
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, TypeAlias
 
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros
 from Basilisk.utilities import RigidBodyKinematics as rbk
 from Basilisk.fswAlgorithms import mrpFeedback, attTrackingError, inertial3D, rwMotorTorque
 from Basilisk.simulation import simpleNav
+
+BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent clearer
 
 from object_definitions.Config_def import Config
 from object_definitions.Satellite_def import Satellite
@@ -84,8 +86,21 @@ class FswStack():
         - rwMotorTorque
         - mode-switching logic
 
-    Schedules:
-        - one internal _FswStackScheduler SysModel on FswTask_<sat_idx>
+    BasiliskSimulator
+    |
+    |---FswProcess_<sat_idx>
+        |
+        |---FswTask_<sat_idx>
+            |
+            |---scheduler [20]
+            |
+            |---navTransRecorder [10]
+            |---navAttRecorder [10]
+            |---attRefRecorder [10]
+            |---attErrRecorder [10]
+            |---cmdTorqueRecorder [10]
+            |---rwMotorTorqueRecorder [10]
+            
     """
 
     def __init__(
@@ -93,6 +108,7 @@ class FswStack():
         sim: BasiliskSimulator,
         sat: Satellite,
         sat_idx: int,
+        scModelTag: str,
         sc_state_out_msg: messaging.SCStatesMsg,
         rw_speed_out_msg: messaging.RWSpeedMsg,
         rw_config_msg: messaging.RWArrayConfigMsg,
@@ -103,24 +119,11 @@ class FswStack():
         sun_state_msg: messaging.SpicePlanetStateMsg,
         log_timestamp: str,
     ):
+        self.scheduler = _FswStackScheduler(self, sat_idx)
         self.sim = sim
         self.sat = sat
         self.sat_idx = sat_idx
-
-        self.ModelTag = f"RwFswStack{sat_idx}"
-        self.logTag = f"FSW{sat_idx}"
-
-        # -------------------------------------------------
-        # Create FSW task inside the owner, like DynamicsModel
-        # -------------------------------------------------
-        assert sim.fswProcesses[sat_idx] is not None
-        self.fswTaskName = f"FswTask_{sat_idx}"
-        sim.fswProcesses[sat_idx].addTask(sim.CreateNewTask(self.fswTaskName, sim.fswRateNanos)) # type: ignore
-
-        # -------------------------------------------------
-        # Existing persistent state
-        # -------------------------------------------------
-        self.pointingMode = PointingMode.COAST
+        self.scModelTag = scModelTag
         self.batStateMsg = bat_state_msg
         self.gsAccessMsgs = gs_access_msgs
         self.gsStateMsgs = gs_state_msgs
@@ -128,14 +131,28 @@ class FswStack():
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
         self.logTimestamp = log_timestamp
-
         self.lastCommsNanos = 0
+        self.ModelTag = f"RwFswStack{sat_idx}"
+        self.logTag = f"FSW{sat_idx}"
+        self.pointingMode = PointingMode.COAST
 
-        self.oldSunEclipseMsgShadowFactor = None
-        self.prevGsPosPrintHours = 0.0
+        # Create FSW task as part of the FSW process
+        assert sim.fswProcesses[sat_idx] is not None
+        self.fswTaskName = f"FswTask_{sat_idx}"
+        sim.fswProcesses[sat_idx].addTask(sim.CreateNewTask(self.fswTaskName, sim.fswRateNanos)) # type: ignore
 
+        # Initialize mode switching log file
         self._log_mode_switching_logic(write_header_only=True)
 
+        # Recorders owned by this class
+        self.navTransRecorder: Optional[BasiliskRecorder] = None          # Position, velocity
+        self.navAttRecorder: Optional[BasiliskRecorder] = None            # Attitude, angular rate
+        self.attRefRecorder: Optional[BasiliskRecorder] = None            # Desired attitude, desired angular rate
+        self.attErrRecorder: Optional[BasiliskRecorder] = None           # Attitude tracking error, angular-rate tracking error
+        self.cmdTorqueRecorder: Optional[BasiliskRecorder] = None         # Commanded body torque
+        self.rwMotorTorqueRecorder: Optional[BasiliskRecorder] = None     # RW motor torques
+        
+        
         # -------------------------------------------------
         # Internal FSW modules
         # -------------------------------------------------
@@ -154,70 +171,51 @@ class FswStack():
         self.rw_map = rwMotorTorque.rwMotorTorque()
         self.rw_map.ModelTag = f"rwMotorTorque_{sat_idx}"
 
-        # -------------------------------------------------
-        # Guidance configuration
-        # -------------------------------------------------
-        self.guid.sigma_R0N = [0.0, 0.0, 0.0]
-
-        # -------------------------------------------------
-        # RW mapping configuration
-        # -------------------------------------------------
+        # RW mapping configuration (controllable axes)
         self.rw_map.controlAxes_B = [
             1, 0, 0,
             0, 1, 0,
             0, 0, 1,
         ]
 
-        # -------------------------------------------------
         # Vehicle config msg
-        # -------------------------------------------------
         vehicle_config_out = messaging.VehicleConfigMsgPayload(ISCPntB_B=sat.I_B)
         self._vc_msg = messaging.VehicleConfigMsg().write(vehicle_config_out)
 
-        # -------------------------------------------------
         # Controller gains
-        # -------------------------------------------------
         self.ctrl.K = MRP_K
         self.ctrl.P = MRP_P
         self.ctrl.Ki = MRP_KI
-
         if self.ctrl.Ki > 0:
             self.ctrl.integralLimit = 2.0 / self.ctrl.Ki * 0.1
 
-        # -------------------------------------------------
         # Message wiring
-        # -------------------------------------------------
         self.nav.scStateInMsg.subscribeTo(sc_state_out_msg)
-
         self.att_err.attNavInMsg.subscribeTo(self.nav.attOutMsg)
         self.att_err.attRefInMsg.subscribeTo(self.guid.attRefOutMsg)
-
         self.ctrl.guidInMsg.subscribeTo(self.att_err.attGuidOutMsg)
         self.ctrl.vehConfigInMsg.subscribeTo(self._vc_msg)
         self.ctrl.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.ctrl.rwSpeedsInMsg.subscribeTo(rw_speed_out_msg)
-
         self.rw_map.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.rw_map.vehControlInMsg.subscribeTo(self.ctrl.cmdTorqueOutMsg)
 
-        # -------------------------------------------------
-        # Exposed outputs
-        # -------------------------------------------------
+        # Exposed output for wiring fsw to the dynamics model
         self.rwMotorTorqueOutMsg = self.rw_map.rwMotorTorqueOutMsg
-        self.attGuidOutMsg = self.att_err.attGuidOutMsg
-        self.cmdTorqueOutMsg = self.ctrl.cmdTorqueOutMsg
-        self.navAttOutMsg = self.nav.attOutMsg
-        self.navTransOutMsg = self.nav.transOutMsg
 
-        self.changed_pointing_obj = False
+        # Initialize the fsw recorders
+        self._setup_fsw_recorders()
 
-        # -------------------------------------------------
-        # Scheduled adapter
-        # -------------------------------------------------
-        self.scheduler = _FswStackScheduler(self, sat_idx)
+        # Add scheduler and recorders to task (Low priority => Executes last)
         sim.AddModelToTask(self.fswTaskName, self.scheduler, 20)
+        sim.AddModelToTask(self.fswTaskName, self.navTransRecorder, 10)
+        sim.AddModelToTask(self.fswTaskName, self.navAttRecorder, 10)
+        sim.AddModelToTask(self.fswTaskName, self.attRefRecorder, 10)
+        sim.AddModelToTask(self.fswTaskName, self.attErrRecorder, 10)
+        sim.AddModelToTask(self.fswTaskName, self.cmdTorqueRecorder, 10)
+        sim.AddModelToTask(self.fswTaskName, self.rwMotorTorqueRecorder, 10)
 
-        logging.debug(f"[{self.logTag}] Created FSW stack for satellite {sat_idx}")
+        logging.debug(f"[{self.logTag}] Created FSW stack for '{self.scModelTag}'")
 
 
     def _modules(self):
@@ -594,7 +592,7 @@ class FswStack():
                 self.guid.sigma_R0N = self._emergency_desired_att()
 
             case _:
-                logging.debug(f"[{self.logTag}] Undefined pointing mode '{self.pointingMode}' reached in {self.ModelTag}")
+                logging.debug(f"[{self.logTag}] Undefined pointing mode '{self.pointingMode}' reached for '{self.scModelTag}'")
                 raise ValueError("")
         
     
@@ -668,7 +666,7 @@ class FswStack():
 
             if not file_exists:
                 writer.writerow(header)
-                logging.debug(f"[{self.logTag}] Mode switching log created for {self.ModelTag}")
+                logging.debug(f"[{self.logTag}] Mode switching log created for '{self.scModelTag}'")
 
             if write_header_only:
                 return
@@ -691,3 +689,45 @@ class FswStack():
             ]
 
             writer.writerow(row)
+
+
+    def _setup_fsw_recorders(self):
+        """
+        Initialize all fsw recorders
+
+        This method sets the attributes:
+            self.navTransRecorder:      Logs position and velocity
+            self.navAttRecorder:        Logs attitude and anfular rate
+            self.attRefRecorder:        Logs desired attitude and angular rate
+            self.attErrRecorder:        Logs attitude and angular rate error
+            self.cmdTorqueRecorder:     Logs commanded body torque
+            self.rwMotorTorqueRecorder: Logs actual RW torque
+        """
+
+        # Relevant Sample rates
+        highSampleRateNanos = self.sim.highSampleRateNanos
+        lowSampleRateNanos = self.sim.lowSampleRateNanos
+        
+        # Verify that rates are exact multiples of dynRate
+        if highSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+        if lowSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'lowSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'LOW_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+
+        # Spacecraft translational and orientational state recorders
+        self.navTransRecorder = self.nav.transOutMsg.recorder(lowSampleRateNanos) # r_BN_N [m] + v_BN_N [m/s]
+        self.navAttRecorder = self.nav.attOutMsg.recorder(highSampleRateNanos) # sigma_BN [MRP] + omega_BN_B [rad/s]
+
+        # Desired orientational states and corresponding error
+        self.attRefRecorder = self.guid.attRefOutMsg.recorder(highSampleRateNanos) # sigma_RN [MRP] + omega_RN_N [rad/s]
+        self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(highSampleRateNanos) # sigma_BR [MRP] + omega_BR_B [rad/s]
+
+        # RW commanded and outputted torque
+        self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(highSampleRateNanos) # torqueRequestBody [Nm]
+        self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(highSampleRateNanos) # motorTorque [Nm]
+
+        logging.debug(f"[{self.logTag}] FSW recorders initialized for '{self.scModelTag}'")
