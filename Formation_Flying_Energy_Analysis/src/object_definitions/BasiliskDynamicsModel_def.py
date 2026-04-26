@@ -16,21 +16,14 @@
 #  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-# Main structure adopted from basilisk/examples/MultiSatBskSim/modelsMultiSat/BSK_MultiSatDynamics.py
+#  Main structure based on basilisk/examples/MultiSatBskSim/modelsMultiSat/BSK_MultiSatDynamics.py
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-import os
 import logging
-import numpy as np
-import matplotlib.pyplot as plt # Only for debug
-import matplotlib.colors as mcolors # only for debug
 from enum import Enum
-from typing import Optional, Any, Union
-from numpy.typing import NDArray
-from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass
+from typing import Optional, Any, TypeAlias
 
 from Basilisk import __path__
 from Basilisk.architecture import messaging
@@ -39,15 +32,15 @@ from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, 
                                 svIntegrators, reactionWheelStateEffector,
                                 RWConfigPayload, groundLocation, thrusterDynamicEffector)
 from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower, fuelTank)
-from Basilisk.utilities import (SimulationBaseClass, macros, orbitalMotion, simIncludeGravBody, 
-                                unitTestSupport, vizSupport, fswSetupRW, simIncludeRW, simIncludeThruster)
+from Basilisk.utilities import (orbitalMotion, 
+                                unitTestSupport, simIncludeRW, simIncludeThruster)
+
+BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent clearer
 
 from object_definitions.Config_def import Config
-from object_definitions.Satellite_def import Satellite
-from object_definitions.SimData_def import SimData, SimObjData
-from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 from object_definitions.FswStack_def import FswStack
-from object_definitions.MsisInputUpdater_def import (MsisInputUpdater, MSIS_SW_KEYS)
+from object_definitions.Satellite_def import Satellite
+from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
     # on the "high-level" orchestrator
@@ -79,14 +72,23 @@ class BasiliskDynamicsModel:
         |---DynamicsTask_<sat_idx>
             |
             |---scObj
-            |---drag      (optional)
-            |---srp       (optional)
-            |---rwEffector
-            |---solarPanel(s)
-            |---rw power model(s)
-            |---power sink
-            |---battery
-            |---recorders
+            |---dragEffector [20]   (optional)
+            |---srpEffector [20]    (optional)
+            |---solarPanel(s) [20]
+            |---rwEffector [20]
+            |---thrusterEffector [20]
+            |---fuelTankEffector [20]
+            |---battery [20]
+            |---obcPowerSink [20]
+            |---rwPower(s) [20]
+            |
+            |---thrusterStateRecorder [10]
+            |---fuelTankStateRecorder [10]
+            |---rwStateRecorder(s) [10]
+            |---rwPowerRecorder(s) [10]
+            |---batteryStateRecorder [10]
+            |---obcPowerSinkRecorder [10]
+            |---solarPanelPowerRecorders(s) [10]
     """
     def __init__(self, 
                  sim: BasiliskSimulator,
@@ -99,6 +101,8 @@ class BasiliskDynamicsModel:
         self.cfg = cfg
         self.sat = sat
         self.sat_idx = sat_idx
+        self.numRWs = len(cfg.spinUVecs)
+        self.numSPs = len(cfg.solar_panels)
         self.logTag = f"DYN{sat_idx}"
     
         # Ensure that the environment model has been initialized
@@ -140,13 +144,19 @@ class BasiliskDynamicsModel:
         self.gs_access_msgs: list[messaging.AccessMsg] = []
         self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
 
-        # TODO Recorders commonly used by the simulator
-        # self.scStateRecorder: Optional[Any] = None
-        # self.rwRecorders: list[Any] = []
-        # self.solarPanelRecorders: list[Any] = []
-        # self.rwPowerRecorders: list[Any] = []
-        # self.batteryRecorder: Optional[Any] = None
-        # self.powerSinkRecorder: Optional[Any] = None       
+        # Recorders owned by this class
+        self.thrusterStateRecorder: Optional[BasiliskRecorder] = None   # Thrust, Isp, max thrust, per thruster
+        self.fuelTankStateRecorder: Optional[BasiliskRecorder] = None   # Remaining propellant
+        self.rwStateRecorders: list[BasiliskRecorder] = []              # RW configs and speeds, per RW 
+        self.rwPowerRecorders: list[BasiliskRecorder] = []              # RW power consumption, per RW
+        self.batteryStateRecorder: Optional[BasiliskRecorder] = None    # Battery charge
+        self.obcPowerSinkRecorder: Optional[BasiliskRecorder] = None    # OBC power consumption
+        self.solarPanelPowerRecorders: list[BasiliskRecorder] = []      # Solar panel power generation, per panel
+        self.rwSpeedRecorder: Optional[BasiliskRecorder] = None         # (minimal replacement for rwStateRecorders) RW speeds
+        
+        # TODO: Move to BasiliskEnvironmentModel
+        # self.sunEclipseRecorder: Optional[BasiliskRecorder] = None      # Sun illumination / shadow factor
+        # self.groundStationAccessRecorder: list[BasiliskRecorder] = []   # Ground station access, per ground station   
         
         # Initialize all dynamics models sequentially
         self._setup_spacecraft_hub()
@@ -160,7 +170,7 @@ class BasiliskDynamicsModel:
         self._setup_fuel_tank()
         self._setup_eps()
         self._setup_integrator()
-        # self._setup_recorders()
+        self._setup_dynamics_recorders()
 
         # Schedule all initialized modules to task
         sim.AddModelToTask(self.dynTaskName, self.scObj, 20)
@@ -177,6 +187,18 @@ class BasiliskDynamicsModel:
         sim.AddModelToTask(self.dynTaskName, self.obcPowerSink, 20)
         for rwPower in self.rwPowerList:
             sim.AddModelToTask(self.dynTaskName, rwPower, 20)
+
+        # Schedule all recorders to task (lower priority => executes after models)
+        sim.AddModelToTask(self.dynTaskName, self.thrusterStateRecorder, 10)
+        sim.AddModelToTask(self.dynTaskName, self.fuelTankStateRecorder, 10)
+        for i in range(self.numRWs):
+            sim.AddModelToTask(self.dynTaskName, self.rwStateRecorders[i], 10)
+            sim.AddModelToTask(self.dynTaskName, self.rwPowerRecorders[i], 10)
+        sim.AddModelToTask(self.dynTaskName, self.batteryStateRecorder, 10)
+        sim.AddModelToTask(self.dynTaskName, self.obcPowerSinkRecorder, 10)
+        for i in range(self.numSPs):
+            sim.AddModelToTask(self.dynTaskName, self.solarPanelPowerRecorders[i], 10)
+        # sim.AddModelToTask(self.dynTaskName, self.rwSpeedRecorder, 10)  
         
 
 
@@ -404,6 +426,9 @@ class BasiliskDynamicsModel:
 
             self.solarPanels.append(solarPanel)
 
+        if len(self.solarPanels) != self.numSPs:
+            raise ValueError(f"[{self.logTag}] The number of initalized solar panels ({len(self.solarPanels)}) is not the same as its own attribute self.numSPs ({self.numSPs})")
+
         logging.debug(f"""[{self.logTag}] {len(self.solarPanels)} solar panel(s) initialized for '{self.scObj.ModelTag}'""")
 
 
@@ -474,6 +499,9 @@ class BasiliskDynamicsModel:
                     useMaxTorque =  True,
                 )
             RWs.append(RW)
+
+        if len(RWs) != self.numRWs:
+            raise ValueError(f"[{self.logTag}] The number of initalized RWs ({len(RWs)}) is not the same as its own attribute self.numRWs ({self.numRWs})")
 
         # Create RW effector and attach to the spacecraft 
         rwEffector = reactionWheelStateEffector.ReactionWheelStateEffector()
@@ -658,41 +686,63 @@ class BasiliskDynamicsModel:
         logging.debug(f"[{self.logTag}] Selecting {integration_method} numerical integrator for '{self.scObj.ModelTag}'")
 
 
-    # def _setup_recorders(self) -> None:
-    #     """
-    #     TODO
-    #     Create common recorders needed by the simulator and future FSW plumbing.
-    #     """
-    #     assert self.scObj is not None
+    def _setup_dynamics_recorders(self) -> None:
+        """
+        Initialize all dynamics recorders 
 
-    #     samplingTime = self.sim.samplingTime
+        This method sets the attributes:
+            self.thrusterStateRecorder:     Logs thrust force, thrust torque, Isp blowdown, Thruster force blowdown
+            self.fuelTankStateRecorder:     Logs fuel mass
+            self.rwStateRecorders:          Logs RW spin speed and torque
+            self.rwPowerRecorders:          Logs RW net power
+            self.batteryStateRecorder:      Logs battery storage level and net power 
+            self.obcPowerSinkRecorder:      Logs OBC sink net power
+            self.solarPanelPowerRecorders:  Logs Solar panel net power
 
-    #     self.scStateRecorder = self.scObj.scStateOutMsg.recorder(samplingTime)
-    #     self.sim.AddModelToTask(self.dynTaskName, self.scStateRecorder)
+        NOTE: A possible data collection optimization is to replace the broad 'rwStateRecorders' with the narrow 'rwSpeedRecorder'
+              If so, the RW torque must be collected from FSW.
+        """
+        # Relevant Sample rates
+        highSampleRateNanos = self.sim.highSampleRateNanos
+        midSampleRateNanos = self.sim.midSampleRateNanos
+        
+        # Verify that rates are exact multiples of dynRate
+        if highSampleRateNanos % self.sim.dynRateNanos != 0.0:
+            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'HIGH_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
+        if midSampleRateNanos % self.sim.dynRateNanos != 0.0:
+            raise ValueError("'midSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'MID_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
+            
+        # Validate that all necessary modules have been initialized
+        assert self.thrusterEffector is not None
+        assert self.fuelTankEffector is not None
+        assert self.rwEffector is not None
+        assert self.battery is not None
+        assert self.obcPowerSink is not None
+        assert self.rwFactory is not None
+        
+        # Thruster and fuel recorders
+        self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(highSampleRateNanos) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (opThrustTorquePntB_B) [Nm]
+        self.fuelTankStateRecorder = self.fuelTankEffector.fuelTankOutMsg.recorder(highSampleRateNanos) # attribute: fuelMass [kg]
 
-    #     if self.rwEffector is not None:
-    #         for j in range(len(self.cfg.spinUVecs)):
-    #             rwLog = self.rwEffector.rwOutMsgs[j].recorder(samplingTime)
-    #             self.sim.AddModelToTask(self.dynTaskName, rwLog)
-    #             self.rwRecorders.append(rwLog)
+        # RW power recorders
+        for i in range(self.numRWs):
+            rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(highSampleRateNanos) # Omega [rad/s] + u_current [Nm]
+            rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(highSampleRateNanos) # netPower [W]
+            self.rwStateRecorders.append(rwStateRec)
+            self.rwPowerRecorders.append(rwPowRec)
 
-    #     for sp in self.solarPanels:
-    #         spLog = sp.nodePowerOutMsg.recorder(samplingTime)
-    #         self.sim.AddModelToTask(self.dynTaskName, spLog)
-    #         self.solarPanelRecorders.append(spLog)
+        # Other Power modules recorders
+        self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(midSampleRateNanos) # storageLevel [Ws] + currentNetPower [W]
+        self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(midSampleRateNanos) # netPower [W]
+        for i in range(self.numSPs):
+            spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(midSampleRateNanos) # netPower [W]
+            self.solarPanelPowerRecorders.append(spPowRec)
 
-    #     for rwPow in self.rwPowerList:
-    #         rwPowLog = rwPow.nodePowerOutMsg.recorder(samplingTime)
-    #         self.sim.AddModelToTask(self.dynTaskName, rwPowLog)
-    #         self.rwPowerRecorders.append(rwPowLog)
+        # RW speed recorder (use instead of rwStateRecorders if only RW speeds are necessary)
+        # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(highSampleRateNanos) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel
 
-    #     if self.powerSink is not None:
-    #         self.powerSinkRecorder = self.powerSink.nodePowerOutMsg.recorder(samplingTime)
-    #         self.sim.AddModelToTask(self.dynTaskName, self.powerSinkRecorder)
-
-    #     if self.battery is not None:
-    #         self.batteryRecorder = self.battery.batPowerOutMsg.recorder(samplingTime)
-    #         self.sim.AddModelToTask(self.dynTaskName, self.batteryRecorder)
-
-
-
+        logging.debug(f"[{self.logTag}] Dynamics recorders initialized for '{self.scObj.ModelTag}'")
