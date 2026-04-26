@@ -16,7 +16,7 @@
 #  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-# Main structure adapted from basilisk/examples/MultiSatBskSim/modelsMultiSat/BSK_EnvironmentEarth.py
+#  Main structure based on basilisk/examples/MultiSatBskSim/modelsMultiSat/BSK_EnvironmentEarth.py
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
@@ -55,14 +55,14 @@ class BasiliskEnvironmentModel:
         |
         |---EnvironmentTask
             |
-            |---spiceObj
-            |---eclipseObj
-            |---groundStation(s) 
-            |---atmObj           (optional)
+            |---spiceObj [20]
+            |---eclipseObj [20]
+            |---groundStation(s) [20] 
+            |---atmObj [20]             (optional)
         |
-        |---MsisInputUpdaterTask (optional)
+        |---MsisInputUpdaterTask        (optional)
             |
-            |---msisInputUpdater (optional)
+            |---msisInputUpdater [20]   (optional)
     """
     def __init__(self, 
                  sim: BasiliskSimulator,
