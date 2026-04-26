@@ -45,78 +45,75 @@ FSW_RATE: float = 0.5 # Update rate for flight software stack
 REL_NAV_RATE: float = 0.5 # TODO: Update rate for the formation flight stack 
 MSIS_RATE: float = 30. # Update rate for MSIS input parameters
 
-TRANS_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
-ATT_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
-POWER_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
+HIGH_SAMPLE_RATE: float = 0.5 # NOTE: Must be integer multilple of 'DYN_RATE'
+MID_SAMPLE_RATE: float = 5. # NOTE: Must be integer multilple of 'DYN_RATE'
+LOW_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
 
 
 class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
     """
     =========================================================================================================
-    Scenario orchestrator for the multi-satellite Basilisk simulation.
+    Interface for running a single GNSS-R formation simulation case defined by the 
+    configuration parameters in its Config input
 
     Ownership model:
         - this class owns simulation time, tasks, processes, initialization, execution,
           scenario-level coordination, and output collection.
         - BasiliskEnvironmentalModels owns shared environmental models/messages.
         - BasiliskDynamicModels owns one spacecraft's physical plant/effectors/recorders.
-        - FswStack owns one spacecraft's software/control pipeline.
+        - FswStack owns one spacecraft's software/control pipeline + recorders.
 
-    ATTRIBUTES:
-        cfg                 (Config) Global config instance 
-        
-        --- Time attributes ---
-        envRate             (float) TODO
-        dynRate             (float) TODO
-        fswRate             (float) TODO
-        relNacRate          (float) TODO
-        spiceTime           (str) Time string used to initialize the SpiceInterface
-        epochMsg            (messaging.EpochMsg) Centralized epoch message used by all models
-        simulationTimeStepNanos
-        simulationDurationSec
-        sampintTime
-        _simStartDt         (datetime) Simulation start time helper
-        _simEndDt           (datetime) Simulation end time helper
-
-    
-        
-       
-    Process-Task-Structure:
-
+    Process-Task-Structure (Higher priority tasks are executed first):
     BasiliskSimulator
     |
     |---EnvironmentProcess
         |
         |---EnvironmentTask
             |
-            |---spiceObj
-            |---eclipseObj
-            |---groundStation(s)
-            |---atmObj           (optional)
+            |---spiceObj [20]
+            |---eclipseObj [20]
+            |---groundStation(s) [20] 
+            |---atmObj [20]             (optional)
         |
-        |---MsisInputUpdaterTask (optional)
+        |---MsisInputUpdaterTask        (optional)
             |
-            |---msisInputUpdater (optional)
+            |---msisInputUpdater [20]   (optional)
     |
     |---DynamicsProcess_<sat_idx>
         |
         |---DynamicsTask_<sat_idx>
             |
             |---scObj
-            |---drag      (optional)
-            |---srp       (optional)
-            |---rwEffector
-            |---solarPanel(s)
-            |---rw power model(s)
-            |---power sink
-            |---battery
-            |---recorders
+            |---dragEffector [20]   (optional)
+            |---srpEffector [20]    (optional)
+            |---solarPanel(s) [20]
+            |---rwEffector [20]
+            |---thrusterEffector [20]
+            |---fuelTankEffector [20]
+            |---battery [20]
+            |---obcPowerSink [20]
+            |---rwPower(s) [20]
+            |
+            |---thrusterStateRecorder [10]
+            |---fuelTankStateRecorder [10]
+            |---rwStateRecorder(s) [10]
+            |---rwStateRecorder(s) [10]
+            |---batteryStateRecorder [10]
+            |---obcPowerSinkRecorder [10]
+            |---solarPanelPowerRecorders(s) [10]
     |
     |---FswProcess_<sat_idx>
         |
         |---FswTask_<sat_idx>
             |
-            |---FswStack
+            |---scheduler [20]
+            |
+            |---navTransRecorder [10]
+            |---navAttRecorder [10]
+            |---attRefRecorder [10]
+            |---attErrRecorder [10]
+            |---cmdTorqueRecorder [10]
+            |---rwMotorTorqueRecorder [10]
     |
     |---FormationNavProcess
         |
@@ -142,9 +139,9 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.relNavRateNanos: int = macros.sec2nano(REL_NAV_RATE)
         self.msisRateNanos: int =   macros.sec2nano(MSIS_RATE)
 
-        self.transSampleRateNanos: int = macros.sec2nano(TRANS_SAMPLE_RATE)
-        self.attSampleRateNanos: int   = macros.sec2nano(ATT_SAMPLE_RATE)
-        self.powerSampleRateNanos: int = macros.sec2nano(POWER_SAMPLE_RATE)
+        self.highSampleRateNanos: int = macros.sec2nano(HIGH_SAMPLE_RATE)
+        self.midSampleRateNanos: int   = macros.sec2nano(MID_SAMPLE_RATE)
+        self.lowSampleRateNanos: int = macros.sec2nano(LOW_SAMPLE_RATE)
         
         self.spiceTime = self._to_spice_utc(self.cfg.startTime) # Used to initialize SPICE interface
         self.epoch_msg: messaging.EpochMsg = unitTestSupport.timeStringToGregorianUTCMsg(self.spiceTime) # Used for time-dependent models (SPICE interface (eclipse model by extension), MSIS)
@@ -177,38 +174,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswProcessNames: list[Optional[str]] = [None] * self.numSatellites
         self.scRuntimeBundles: list[Optional[SpacecraftRuntimeBundle]] = [None] * self.numSatellites
 
-        
-        
-        
-        
-        # # Convenience containers kept for backward-compatible downstream usage
-        # self.scObjects: list[Any] = []
-        # self.scRecorders: list[Any] = []
-        # self.atmRecorders: list[Any] = []
-        # self.rwMotorRecorders: list[Any] = []
-        # self.attErrRecorders: list[Any] = []
-        # self.snTransRecorders: list[Any] = []
-        # self.mrpRecorders: list[Any] = []
-        # self.rwRecorders: list[list[Any]] = []
-        # self.allSpRecorders: list[list[Any]] = []
-        # self.allRwPowRecorders: list[list[Any]] = []
-        # self.psRecorders: list[Any] = []
-        # self.batRecorders: list[Any] = []
-        # self.fswStacks: list[FswStack] = []
-        # self.dynModels: list[BasiliskDynamicModels] = []
-
-        # # Model and coresponding process containers
-        # self.DynModels = []
-        # self.FSWModels = []
-        # self.envProcessName: Optional[str] = None
-        # self.DynamicsProcessName = []
-        # self.FSWProcessName = []
-        # self.envProcess = None
-        # self.dynProcess = []
-        # self.fswProcess = []
-
         # ------------------------------------------------------------------
-        # 1) Shared environmental models
+        # 1) Shared environmental model
         # ------------------------------------------------------------------
         self.envModel = self._build_environment_model()
 
@@ -217,7 +184,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # 2) Per-satellite dynamics + FSW
         # ------------------------------------------------------------------
         for sat_idx, sat in enumerate(self.cfg.satellites):
-
             # Build per-satellite components, dynamics and FSW, then bundle
             dynModel =        self._build_spacecraft_dynamics_model(sat_idx, sat)
             fsw =             self._build_spacecraft_fsw(sat_idx, sat, dynModel)
@@ -225,22 +191,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
             # Add bundle to stable list
             self.scRuntimeBundles[sat_idx] = scRuntimeBundle
-
-            # Stable backward-compatible containers
-            # self.dynModels.append(runtime.dyn)
-            # self.fswStacks.append(runtime.fsw)
-            # self.scObjects.append(runtime.sc_obj)
-            # self.scRecorders.append(runtime.sc_state_recorder)
-            # self.atmRecorders.append(runtime.atm_recorder)
-            # self.rwMotorRecorders.append(runtime.rw_motor_recorder)
-            # self.attErrRecorders.append(runtime.att_err_recorder)
-            # self.snTransRecorders.append(runtime.nav_trans_recorder)
-            # self.mrpRecorders.append(runtime.rw_speed_recorder)
-            # self.rwRecorders.append(runtime.rw_recorders)
-            # self.allSpRecorders.append(runtime.solar_panel_recorders)
-            # self.allRwPowRecorders.append(runtime.rw_power_recorders)
-            # self.psRecorders.append(runtime.power_sink_recorder)
-            # self.batRecorders.append(runtime.battery_recorder)
+        
 
         # ------------------------------------------------------------------
         # 3) Visualization
@@ -258,9 +209,12 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
         logging.debug("[BSK] Modular Basilisk simulation setup complete")
 
-    # ======================================================================
-    # Public functions
-    # ======================================================================
+
+
+
+    ####################
+    # Public functions #
+    ####################
 
     def run(self) -> None:
         """
@@ -274,10 +228,18 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
 
 
+    def output_data(self) -> None:
+        """
+        Read the data from all recorders and output a single data file
+        """
+        logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")
 
-    # ======================================================================
-    # Private scenario construction functions
-    # ======================================================================
+
+
+
+    ###########################################
+    # Private scenario construction functions #
+    ###########################################
 
     def _build_environment_model(self) -> BasiliskEnvironmentModel:
         """
@@ -343,6 +305,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             sim = self,
             sat = sat,
             sat_idx = sat_idx,
+            scModelTag = dynModel.scObj.ModelTag,
             sc_state_out_msg = dynModel.sc_state_out_msg,
             rw_speed_out_msg = dynModel.rw_speed_out_msg,
             rw_config_msg = dynModel.rw_config_msg,
@@ -378,32 +341,11 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         return scRuntimeBundle
 
 
-    def _extract_scObjs_from_scRuntimeBundles(self) -> list[spacecraft.Spacecraft]:
-        """
-        Extract a list of Spacecraft instances from 'self.scRuntimeBundles'.
-        """
-        
-        if (len(self.scRuntimeBundles) == 0) or (None in self.scRuntimeBundles):
-            raise AttributeError(f"""[BSK] 'self.scRuntimeBundles' does not contain enough initialized SpacecraftRuntimeBundle-s. 
-                                 -> Cannot extract scObj list""")
-        
-        if len(self.scRuntimeBundles) != self.numSatellites:
-            raise AttributeError(f"""[BSK] self.scRuntimeBundles' contains {len(self.scRuntimeBundles)} instances, 
-                                 expected the same as number of satellites ({self.numSatellites}). 
-                                 -> Cannot extract scObj list""")
-        
-        # Get spacecraft objects
-        scObjs: list[spacecraft.Spacecraft] = []
-        for i, sc in enumerate(self.scRuntimeBundles):
-            assert sc is not None # actually obsolete, but included to make pylance happy
-            scObjs.append(sc.scObj)
-
-        return scObjs
 
 
-    # ======================================================================
-    # Private helper
-    # ======================================================================
+    ############################
+    # Private helper functions #
+    ############################
 
     def _configure_vizard(self):
         """
@@ -553,14 +495,40 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         return self.viz
     
 
+    def _extract_scObjs_from_scRuntimeBundles(self) -> list[spacecraft.Spacecraft]:
+        """
+        Extract a list of Spacecraft instances from 'self.scRuntimeBundles'.
+        """
+        
+        if (len(self.scRuntimeBundles) == 0) or (None in self.scRuntimeBundles):
+            raise AttributeError(f"""[BSK] 'self.scRuntimeBundles' does not contain enough initialized SpacecraftRuntimeBundle-s. 
+                                 -> Cannot extract scObj list""")
+        
+        if len(self.scRuntimeBundles) != self.numSatellites:
+            raise AttributeError(f"""[BSK] self.scRuntimeBundles' contains {len(self.scRuntimeBundles)} instances, 
+                                 expected the same as number of satellites ({self.numSatellites}). 
+                                 -> Cannot extract scObj list""")
+        
+        # Get spacecraft objects
+        scObjs: list[spacecraft.Spacecraft] = []
+        for i, sc in enumerate(self.scRuntimeBundles):
+            assert sc is not None # actually obsolete, but included to make pylance happy
+            scObjs.append(sc.scObj)
+
+        return scObjs
+
+    
+    
     def _output_data(self) -> None:
         """
+        [DEPRECIATED]
         Output simulation data.
         """
         if self.sim_data is None:
             raise ValueError("Simulation data not yet generated. Call run() before _output_data().")
 
         self.sim_data.write_data_to_file(self.cfg.timestamp_str, "bsk")
+
 
     @staticmethod
     def _to_spice_utc(s: str) -> str:
