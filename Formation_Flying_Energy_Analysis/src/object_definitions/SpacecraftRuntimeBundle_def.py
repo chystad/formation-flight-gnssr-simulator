@@ -13,8 +13,6 @@ from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.FswStack_def import FswStack
 
 
-
-
 @dataclass
 class SpacecraftRuntimeBundle:
     """
@@ -30,23 +28,3 @@ class SpacecraftRuntimeBundle:
     # Per-satellite model objects (environment models are omitted bc. they are same for all)
     dynModel: BasiliskDynamicsModel
     fsw: FswStack
-
-    # Frequently used handles cached at orchestration level
-    # sc_state_recorder: Any
-
-    # Optional/common recorders
-    # atm_recorder: Any = None
-    # rw_motor_recorder: Any = None
-    # att_err_recorder: Any = None
-    # nav_trans_recorder: Any = None
-    # rw_speed_recorder: Any = None
-    # battery_recorder: Any = None
-    # power_sink_recorder: Any = None
-
-    # Collections
-    # rw_recorders: list[Any] = field(default_factory=list)
-    # solar_panel_recorders: list[Any] = field(default_factory=list)
-    # rw_power_recorders: list[Any] = field(default_factory=list)
-
-    # Escape hatch for future additions
-    # extra: dict[str, Any] = field(default_factory=dict)
