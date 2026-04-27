@@ -1,0 +1,10 @@
+MONTE_CARLO:
+  mc_enabled: false  # Toggle for running many bsk simulation for varying satellite initial conditions. 
+                    # This toggle also affect how sim data gets outputted and visualized
+  num_bsk_sims: 2   # Total number of bsk simulations to be run in a single Monte Carlo run
+
+  # Descriptions used to create run metadata (No impact on simulation)
+  desc_gnssr_formation_type: constant along-track separation
+  desc_varied_parameters: Individual satellite initial deployment velocity and angular velocity relative to deployer
+  desc_goal: Investigate the electricity and fuel consumption for a realistic GNSS-r mission over long duration with 
+    this formation type
