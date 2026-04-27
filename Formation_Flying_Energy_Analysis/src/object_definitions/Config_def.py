@@ -7,17 +7,17 @@ from numpy.typing import NDArray
 from pathlib import Path
 from datetime import datetime
 
+from Basilisk.utilities import (orbitalMotion, macros)
+
 from object_definitions.Satellite_def import Satellite
-from object_definitions.GroundStation_def import GroundStation
 from object_definitions.SolarPanel_def import SolarPanel
-from object_definitions.SimData_def import OUTPUT_DATA_SAVE_DIR
-
-from Basilisk.utilities import (orbitalMotion, macros, unitTestSupport)
-
+from object_definitions.GroundStation_def import GroundStation
+from object_definitions.MonteCarloConfig_def import MonteCarloConfig
+from constants import (OUTPUT_DATA_ROOT_DIR, SINGLE_OUTPUT_DATA_DIR_NAME, BATCH_OUTPUT_DATA_DIR_NAME)
 
 
 class Config:
-    def __init__(self, config_file_path: str) -> None:
+    def __init__(self, config_file_path: str, mc_cfg: MonteCarloConfig, run_idx: int) -> None:
         """
         =========================================================================================================
         [WORK IN PROGRESS]
@@ -28,7 +28,12 @@ class Config:
            config_file_path                    
         
         ATTRIBUTES:
-            startTime (str):                TODO: Replace with functionality that automatically uses the Epoch from the oldest TLE file as startDate
+            mc_enabled (bool):                  If Monte Carlo simulation is enabled/disabled (TODO: This will impact 
+                                                how logging is configured and how data and plots are outputted) 
+            run_idx (int):                  The current bsk simulator run number. 0 if mc_enabled == False or if this is the first run in MC
+            mc_output_data_dir (Path):      The path to the folder where data from each sim in the Monte Carlo run is saved  
+            single_output_data_dir (Path):  The path to the folder where data from a single simulation without Monte Carlo is saved
+            startTime (str):                Simulation start time epoch in UTC
             simulationDuration (float):     Simulation duration in hours
             use_old_skf_data (bool):        If true: skip the Skyfield simulation and instead use the data from a previous run.
                                                 Used when you want to compare the same SGP4 baseline against multiple Basilisk runs.
@@ -47,76 +52,79 @@ class Config:
         ###################
         # Load cofig file #
         ###################
-        d_cfg = self.read(config_file_path) # default config
+        if (not mc_cfg.mc_enabled) or (run_idx == 0):
+            cfg = self.read(config_file_path)
+        else:
+            cfg = self._resolve_base_override(config_file_path, mc_cfg, run_idx)
         
         ##################################################
         # Fetch global simulation parameters config file #
         ##################################################
-        startTime_str =         str(    d_cfg['SIMULATION']['startTime'])
-        simulationDuration =    float(  d_cfg['SIMULATION']['simulationDuration'])  
-        deltaT =                float(  d_cfg['SIMULATION']['deltaT'])  
-        integrator =            str(    d_cfg['SIMULATION']['integrator'])
-        num_satellites =        int(    d_cfg['SIMULATION']['num_satellites'])
-        sat_init_source =       str(    d_cfg['SIMULATION']['sat_init_source'])
-        all_sat_params =                d_cfg['SATELLITES'] # dict[str, dict[str, Any]]
-        all_gs_params =                 d_cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
+        startTime_str =         str(    cfg['SIMULATION']['startTime'])
+        simulationDuration =    float(  cfg['SIMULATION']['simulationDuration'])  
+        deltaT =                float(  cfg['SIMULATION']['deltaT'])  
+        integrator =            str(    cfg['SIMULATION']['integrator'])
+        num_satellites =        int(    cfg['SIMULATION']['num_satellites'])
+        sat_init_source =       str(    cfg['SIMULATION']['sat_init_source'])
+        all_sat_params =                cfg['SATELLITES'] # dict[str, dict[str, Any]]
+        all_gs_params =                 cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
 
         # Electrical power system parameters (same for all satellites)
-        bat_storage_capacity =  float(  d_cfg['EPS_PARAMETERS']['bat_storage_capacity'])
-        init_bat_charge =       float(  d_cfg['EPS_PARAMETERS']['init_bat_charge'])
-        RW_base_draw =          float(  d_cfg['EPS_PARAMETERS']['RW_base_draw'])
-        OBC_const_draw =        float(  d_cfg['EPS_PARAMETERS']['OBC_const_draw'])
-        all_sp_params =                 d_cfg['EPS_PARAMETERS']['solar_panels'] # dict[str, dict[str, Any]]  
+        bat_storage_capacity =  float(  cfg['EPS_PARAMETERS']['bat_storage_capacity'])
+        init_bat_charge =       float(  cfg['EPS_PARAMETERS']['init_bat_charge'])
+        RW_base_draw =          float(  cfg['EPS_PARAMETERS']['RW_base_draw'])
+        OBC_const_draw =        float(  cfg['EPS_PARAMETERS']['OBC_const_draw'])
+        all_sp_params =                 cfg['EPS_PARAMETERS']['solar_panels'] # dict[str, dict[str, Any]]  
 
         # Reaction wheel parameters (same for all satellites)
-        RW_model =              str(    d_cfg['RW_PARAMETERS']['RW_model'])
-        spinUVecs =                     d_cfg['RW_PARAMETERS']['spinUVecs'] # list[list[float]]
-        init_rpm =              float(  d_cfg['RW_PARAMETERS']['init_rpm'])
-        max_rpm =               float(  d_cfg['RW_PARAMETERS']['max_rpm'])
-        maxMomentum =           float(  d_cfg['RW_PARAMETERS']['maxMomentum'])
-        maxTorque =             float(  d_cfg['RW_PARAMETERS']['maxTorque'])
-        minTorque =             float(  d_cfg['RW_PARAMETERS']['minTorque'])
-        # I_RW =                  float(  d_cfg['RW_PARAMETERS']['I_RW'])
-        useMinTorque =          bool(   d_cfg['RW_PARAMETERS']['useMinTorque'])
-        useFriction =           bool(   d_cfg['RW_PARAMETERS']['useFriction'])
-        fCoulomb =              float(  d_cfg['RW_PARAMETERS']['fCoulomb'])
-        fStatic =               float(  d_cfg['RW_PARAMETERS']['fStatic'])
-        betaStatic =            float(  d_cfg['RW_PARAMETERS']['betaStatic'])
-        cViscous =              float(  d_cfg['RW_PARAMETERS']['cViscous'])
+        RW_model =              str(    cfg['RW_PARAMETERS']['RW_model'])
+        spinUVecs =                     cfg['RW_PARAMETERS']['spinUVecs'] # list[list[float]]
+        init_rpm =              float(  cfg['RW_PARAMETERS']['init_rpm'])
+        max_rpm =               float(  cfg['RW_PARAMETERS']['max_rpm'])
+        maxMomentum =           float(  cfg['RW_PARAMETERS']['maxMomentum'])
+        maxTorque =             float(  cfg['RW_PARAMETERS']['maxTorque'])
+        minTorque =             float(  cfg['RW_PARAMETERS']['minTorque'])
+        # I_RW =                  float(  cfg['RW_PARAMETERS']['I_RW'])
+        useMinTorque =          bool(   cfg['RW_PARAMETERS']['useMinTorque'])
+        useFriction =           bool(   cfg['RW_PARAMETERS']['useFriction'])
+        fCoulomb =              float(  cfg['RW_PARAMETERS']['fCoulomb'])
+        fStatic =               float(  cfg['RW_PARAMETERS']['fStatic'])
+        betaStatic =            float(  cfg['RW_PARAMETERS']['betaStatic'])
+        cViscous =              float(  cfg['RW_PARAMETERS']['cViscous'])
         
         # Thruster parameters (same for all satellites)
-        thr_pos_B =                     d_cfg['THRUSTER_PARAMETERS']['thr_pos_B'] # list[float]
-        thr_dir_B =                     d_cfg['THRUSTER_PARAMETERS']['thr_dir_B'] # list[float]
-        thr_model_override =    str(    d_cfg['THRUSTER_PARAMETERS']['thr_model_override'])
-        use_min_pulse_time =    bool(   d_cfg['THRUSTER_PARAMETERS']['use_min_pulse_time'])
-        min_pulse_time =        float(  d_cfg['THRUSTER_PARAMETERS']['min_pulse_time'])
-        max_thrust =            float(  d_cfg['THRUSTER_PARAMETERS']['max_thrust'])
-        thrust_blowdown_coeff =         d_cfg['THRUSTER_PARAMETERS']['thrust_blowdown_coeff'] # list[float]
-        steady_isp =            float(  d_cfg['THRUSTER_PARAMETERS']['steady_isp'])
-        isp_blowdown_coeff =            d_cfg['THRUSTER_PARAMETERS']['isp_blowdown_coeff'] # list[float]
-        area_nozzle =           float(  d_cfg['THRUSTER_PARAMETERS']['area_nozzle'])
-        thr_mag_disp =          float(  d_cfg['THRUSTER_PARAMETERS']['thr_mag_disp'])
+        thr_pos_B =                     cfg['THRUSTER_PARAMETERS']['thr_pos_B'] # list[float]
+        thr_dir_B =                     cfg['THRUSTER_PARAMETERS']['thr_dir_B'] # list[float]
+        thr_model_override =    str(    cfg['THRUSTER_PARAMETERS']['thr_model_override'])
+        use_min_pulse_time =    bool(   cfg['THRUSTER_PARAMETERS']['use_min_pulse_time'])
+        min_pulse_time =        float(  cfg['THRUSTER_PARAMETERS']['min_pulse_time'])
+        max_thrust =            float(  cfg['THRUSTER_PARAMETERS']['max_thrust'])
+        thrust_blowdown_coeff =         cfg['THRUSTER_PARAMETERS']['thrust_blowdown_coeff'] # list[float]
+        steady_isp =            float(  cfg['THRUSTER_PARAMETERS']['steady_isp'])
+        isp_blowdown_coeff =            cfg['THRUSTER_PARAMETERS']['isp_blowdown_coeff'] # list[float]
+        area_nozzle =           float(  cfg['THRUSTER_PARAMETERS']['area_nozzle'])
+        thr_mag_disp =          float(  cfg['THRUSTER_PARAMETERS']['thr_mag_disp'])
         
         # Magnetorquer parameters (same for all satellites)
-        temp =                  bool(   d_cfg['MTQ_PARAMETERS']['temp'])
+        temp =                  bool(   cfg['MTQ_PARAMETERS']['temp'])
         
         # Disturbance torque settings
-        temp =                  bool(   d_cfg['DISTURBANCE_TORQUE']['temp'])
+        temp =                  bool(   cfg['DISTURBANCE_TORQUE']['temp'])
         
         # Disturbance force settings
-        sphericalHarmonicsDegree =      int(    d_cfg['DISTURBANCE_FORCE']['sphericalHarmonicsDegree'])
-        useSphericalHarmonics =         bool(   d_cfg['DISTURBANCE_FORCE']['useSphericalHarmonics'])
-        useMsisDrag =                   bool(   d_cfg['DISTURBANCE_FORCE']['useMsisDrag'])
-        useExponentialDensityDrag =     bool(   d_cfg['DISTURBANCE_FORCE']['useExponentialDensityDrag'])
-        useSRP =                        bool(   d_cfg['DISTURBANCE_FORCE']['useSRP'])
-        useSun3rdBody =                 bool(   d_cfg['DISTURBANCE_FORCE']['useSun3rdBody'])
-        useMoon3rdBody =                bool(   d_cfg['DISTURBANCE_FORCE']['useMoon3rdBody'])
-
+        sphericalHarmonicsDegree =      int(    cfg['DISTURBANCE_FORCE']['sphericalHarmonicsDegree'])
+        useSphericalHarmonics =         bool(   cfg['DISTURBANCE_FORCE']['useSphericalHarmonics'])
+        useMsisDrag =                   bool(   cfg['DISTURBANCE_FORCE']['useMsisDrag'])
+        useExponentialDensityDrag =     bool(   cfg['DISTURBANCE_FORCE']['useExponentialDensityDrag'])
+        useSRP =                        bool(   cfg['DISTURBANCE_FORCE']['useSRP'])
+        useSun3rdBody =                 bool(   cfg['DISTURBANCE_FORCE']['useSun3rdBody'])
+        useMoon3rdBody =                bool(   cfg['DISTURBANCE_FORCE']['useMoon3rdBody'])
         
+
         ################################################################
         # Perform checks to ensure parameters are received as expected #
-        ################################################################
-       
+        ################################################################      
+
         # Validate RW parameters
         self.validate_rw_parameters(
             RW_model, 
@@ -166,8 +174,13 @@ class Config:
         ##############################
         # Assign instance attributes #
         ##############################
+        # Monte Carlo
+        self.mc_enabled: bool = mc_cfg.mc_enabled
+        self.run_idx: int = run_idx
+        
         # Simulation
-        self.timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.output_data_save_dir: Path = self._build_output_data_save_dir(mc_cfg, run_idx)
+        self.timestamp_str: str = mc_cfg.timestamp_str
         self.startTime: str = startTime_str
         self.simulationDuration: float = simulationDuration
         self.deltaT: float = deltaT
@@ -236,7 +249,7 @@ class Config:
         self.save_config(config_file_path)
 
 
-    def read(self, config_file_path: str):
+    def read(self, config_file_path: str) -> dict:
         # Get full path to the target config file
         config_path = Path(config_file_path)
         
@@ -247,16 +260,73 @@ class Config:
         return config
     
 
+    def _resolve_base_override(self,
+                               base_config_file_path: str,
+                               mc_cfg: MonteCarloConfig,
+                               run_idx: int
+                               ) -> dict:
+        """
+        Load base.yaml and, if Monte Carlo is enabled, recursively merge the run-specific
+        override file into it.
+
+        The override only needs to contain the fields that should change.
+        Unspecified fields remain equal to the base config.
+        """
+
+        base_cfg = self.read(base_config_file_path)
+
+        # Single run or run_000 uses pure base config
+        if not mc_cfg.mc_enabled or run_idx == 0:
+            return base_cfg
+
+        override_path = Path(
+            f"Formation_Flying_Energy_Analysis/configs/run_overrides/run_{run_idx:03d}.yaml"
+        )
+
+        if not override_path.is_file():
+            raise FileNotFoundError(
+                f"Monte Carlo override file not found for run {run_idx}: {override_path}"
+            )
+
+        override_cfg = self.read(str(override_path))
+
+        resolved_cfg = self._deep_merge_dicts(base_cfg, override_cfg)
+
+        return resolved_cfg
+    
+
+    def _deep_merge_dicts(self, base: dict, override: dict) -> dict:
+        """
+        Recursively merge override into base.
+
+        If both base[key] and override[key] are dicts, merge them recursively.
+        Otherwise, override[key] replaces base[key].
+        """
+        merged = dict(base)
+
+        for key, override_value in override.items():
+            if (
+                key in merged
+                and isinstance(merged[key], dict)
+                and isinstance(override_value, dict)
+            ):
+                merged[key] = self._deep_merge_dicts(merged[key], override_value)
+            else:
+                merged[key] = override_value
+
+        return merged
+    
+    
     def save_config(self, config_file_path: str) -> None:
         """
         Save the config file as:
             <repo_root>/Bsk_Skf_Propagation_Comparison/output_data/sim_data/<timestamp_str>_cfg.yaml
         """
         # Ensure output directory exists
-        OUTPUT_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        self.output_data_save_dir.mkdir(parents=True, exist_ok=True)
 
         # Build output path using timestamp_str from this Config instance
-        out_path = OUTPUT_DATA_SAVE_DIR / f"{self.timestamp_str}_cfg.yaml"
+        out_path = self.output_data_save_dir / f"{self.timestamp_str}_cfg.yaml"
 
         # Config paths
         default_cfg_path = Path(config_file_path)
@@ -276,6 +346,36 @@ class Config:
 
         logging.info(f"[CFG] Config snapshot written to: {out_path}")
     
+
+    def _build_output_data_save_dir(self,
+                                    mc_cfg: MonteCarloConfig,
+                                    run_idx: int
+                                    ) -> Path:
+        """
+        If this basilisk run is a part of a Monte Carlo run, build:
+            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / BATCH_OUTPUT_DATA_DIR_NAME / mc_dir_name / mc_run_dir_name
+        Else, build:
+            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / SINGLE_OUTPUT_DATA_DIR_NAME
+        """
+        
+        # Define the output data save folder name for single runs outside of Monte Carlo
+        mc_dir_name = mc_cfg.mc_dir_name
+        mc_run_dir_name = f"run_{run_idx:03d}" # TODO: Assign to attribute
+
+        # Ensure output data root folder exists
+        OUTPUT_DATA_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Build the data output dir path depending on if it's a Monte Carlo run or not
+        if mc_cfg.mc_enabled:
+            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / BATCH_OUTPUT_DATA_DIR_NAME / mc_dir_name / mc_run_dir_name
+        else:
+            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / SINGLE_OUTPUT_DATA_DIR_NAME
+
+        # Ensure full output data folder exists
+        output_data_save_dir.mkdir(parents=True, exist_ok=True)
+
+        return output_data_save_dir
+
 
     def generate_satellite_instances_from_config(self, 
                                                  all_sat_params: dict[str, dict[str, float]],
