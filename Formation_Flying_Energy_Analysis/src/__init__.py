@@ -5,36 +5,49 @@ from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
 from object_definitions.Config_def import Config
+from object_definitions.MonteCarloConfig_def import MonteCarloConfig
 
 
-def initialize(config_file_path) -> Config:
+def initialize(mc_config_file_path) -> MonteCarloConfig:
     """
     ==========================================================================================================
-    1. Configure logging format
-    2. Initialize global config instance
+    1. Initialize global Monte Carlo instance
+    2. Configure global logging format
     ==========================================================================================================
     """
-    # Configure debug logging format
-    logging.basicConfig(
-        format="%(asctime)s    %(message)s",
-        datefmt="[%H:%M:%S]",
-        level=logging.DEBUG,
-    )
+    mc_cfg = MonteCarloConfig(mc_config_file_path)
 
-    # Only show warnings and errors globally
-    logging.basicConfig(level=logging.WARNING)
+    if mc_cfg.mc_enabled:
+        # -------------------------------------------------------------
+        # Configure reduced per-sim logging
+        # -------------------------------------------------------------
+        
+        # TODO
+        pass
 
-    # Matplotlib: silence backend + font-manager chatter
-    mpl.set_loglevel("warning")
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+    else:
+        # -------------------------------------------------------------
+        # Configure full debug logging
+        # -------------------------------------------------------------
 
-    # Pillow (PIL): silence PNG chunk debug like "STREAM b'IHDR'"
-    #PngImagePlugin.debug = False
-    logging.getLogger("PIL").setLevel(logging.WARNING)
-    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
-    
-    # Get Config instance forom config file
-    cfg = Config(config_file_path)
+        # Configure debug logging format
+        logging.basicConfig(
+            format="%(asctime)s    %(message)s",
+            datefmt="[%H:%M:%S]",
+            level=logging.DEBUG,
+        )
 
-    return cfg
+        # Only show warnings and errors globally
+        logging.basicConfig(level=logging.WARNING)
+
+        # Matplotlib: silence backend + font-manager chatter
+        mpl.set_loglevel("warning")
+        logging.getLogger("matplotlib").setLevel(logging.WARNING)
+        logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+
+        # Pillow (PIL): silence PNG chunk debug like "STREAM b'IHDR'"
+        #PngImagePlugin.debug = False
+        logging.getLogger("PIL").setLevel(logging.WARNING)
+        logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+
+    return mc_cfg
