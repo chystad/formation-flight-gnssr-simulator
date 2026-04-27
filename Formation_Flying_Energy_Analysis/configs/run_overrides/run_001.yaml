@@ -1,0 +1,10 @@
+SIMULATION:
+  simulationDuration: 1
+
+SATELLITES:
+  leader:
+    init_att: [[0.11], [0.11], [0.11]]
+    init_angvel: [[0.11], [0.11], [0.11]]
+  follower-1:
+    init_att: [[0.12], [0.12], [0.12]]
+    init_angvel: [[0.12], [0.12], [0.12]] 
