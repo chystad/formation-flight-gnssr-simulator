@@ -1,22 +1,46 @@
-import logging
-
 from __init__ import initialize
+from constants import MC_CONFIG_PATH, BASE_CONFIG_PATH
+from object_definitions.Config_def import Config
+from object_definitions.MonteCarloConfig_def import MonteCarloConfig
 from object_definitions.BasiliskSimulator_def import BasiliskSimulator
 
-def simulate_gnssr_mission():
 
-    # Load config and define all neccessary objects
-    cfg = initialize('Formation_Flying_Energy_Analysis/configs/base.yaml')
+def simulate_single_gnssr_mission(mc_cfg: MonteCarloConfig, run_idx: int = 0):
+    
+    # Load config and resolve overrides (if necessary)
+    cfg = Config(BASE_CONFIG_PATH, mc_cfg, run_idx)
 
-    # Initialize Basilisk Dynamic Model Propagator
+    # Initialize Basilisk simulator 
     bsk = BasiliskSimulator(cfg)
 
-    # Run Basilisk Dynamic Model Propagator
+    # Run Basilisk simulator for the configured scenario
     bsk.run()
+
+    # Output data to file
+    bsk.output_data()
+
+
+
+def monte_carlo_gnssr_mission(mc_cfg: MonteCarloConfig): 
+    # run 'n' bsk simulations
+    for i in range(mc_cfg.num_bsk_sims):
+        simulate_single_gnssr_mission(mc_cfg, i)
+
 
 
 if __name__ == "__main__":
-    simulate_gnssr_mission()
+    
+    # Initialize monte carlo config instance and set up logging
+    mc_cfg = initialize(MC_CONFIG_PATH)
+    
+    # If Monte Carlo is enabled, generate 'n-1' override files and run 'n' bsk simulations
+    if mc_cfg.mc_enabled:
+        mc_cfg.generate_config_overrides()
+        monte_carlo_gnssr_mission(mc_cfg)
+    
+    # Else run a single bsk simulation
+    else:
+        simulate_single_gnssr_mission(mc_cfg)
 
 
 # TODO
