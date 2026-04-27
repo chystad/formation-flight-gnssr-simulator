@@ -28,9 +28,10 @@ from Basilisk.utilities import SimulationBaseClass, simulationArchTypes, macros,
 from Basilisk.simulation import spacecraft
 
 from object_definitions.Config_def import Config
+from object_definitions.SimData_def import (SpacecraftSimData, MissionSimData)
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
-from object_definitions.SimData_def import SimData, SimObjData
+from object_definitions.SimDataWriter_def import SimDataWriter
 from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
@@ -127,8 +128,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
         self.cfg = cfg
         self.numSatellites = cfg.num_satellites
-        self.sim_data: Optional[SimData] = None # TODO: I think the entire data structure and saving 
-        # should be changed to something more manageble and more compatible with the Basilisk arcitecture
         
         # ------------------------------------------------------------------
         # Time configuration
@@ -174,6 +173,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswProcessNames: list[Optional[str]] = [None] * self.numSatellites
         self.scRuntimeBundles: list[Optional[SpacecraftRuntimeBundle]] = [None] * self.numSatellites
 
+
         # ------------------------------------------------------------------
         # 1) Shared environmental model
         # ------------------------------------------------------------------
@@ -196,7 +196,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # ------------------------------------------------------------------
         # 3) Visualization
         # ------------------------------------------------------------------
-        if len(self.scRuntimeBundles) > 0:
+        if (not self.cfg.mc_enabled) and (len(self.scRuntimeBundles) > 0):
             self._configure_vizard()
             
 
@@ -227,12 +227,35 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         logging.debug("[BSK] Basilisk simulation complete")
 
 
-
     def output_data(self) -> None:
         """
         Read the data from all recorders and output a single data file
         """
         logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")
+        return
+
+        # Local data containers for spacecraft and mission data
+        scSimDataList: list[SpacecraftSimData] = []
+        missionSimData: MissionSimData # TODO
+        
+        # Extract per-spacecraft data from recorders
+        for i in range(len(self.scRuntimeBundles)):
+            scRuntimeBundle = self.scRuntimeBundles[i]
+
+            assert scRuntimeBundle is not None
+
+            if i != scRuntimeBundle.sat_idx:
+                raise ValueError(f"Index mismatch between element #{i} in scRuntimeBundles and it satellite index #{scRuntimeBundle.sat_idx}")
+
+            scSimData = self._pull_single_satellite_data(scRuntimeBundle)
+            scSimDataList.append(scSimData)
+
+        # Extract mission data from recorders
+        # TODO
+
+        # Write data to files using a 'SimDataWriter' helper object
+        dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
+        dataWriter.write_data_to_files()
 
 
 
@@ -495,6 +518,29 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         return self.viz
     
 
+    def _pull_single_satellite_data(self, scRuntimeBundle: SpacecraftRuntimeBundle) -> SpacecraftSimData:
+        """
+        Pull all relevant data fields from the recorders in SpacecraftRuntimeBundle.
+
+        Returns:
+            SpacecraftSimData: Data container for one spacecraft
+        """
+        
+        dynModel = scRuntimeBundle.dynModel
+        fsw = scRuntimeBundle.fsw
+
+        assert fsw.navTransRecorder is not None
+
+        # Pull all relevant data fields from recorders
+        pos = fsw.navTransRecorder.r_BN_N
+        # TODO: Add rest of the per-spacecraft fields
+
+        # TODO: Bundle all spacecraft data into container
+        scSimData = SpacecraftSimData(TODO=True)
+
+        return scSimData
+    
+    
     def _extract_scObjs_from_scRuntimeBundles(self) -> list[spacecraft.Spacecraft]:
         """
         Extract a list of Spacecraft instances from 'self.scRuntimeBundles'.
@@ -516,18 +562,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             scObjs.append(sc.scObj)
 
         return scObjs
-
-    
-    
-    def _output_data(self) -> None:
-        """
-        [DEPRECIATED]
-        Output simulation data.
-        """
-        if self.sim_data is None:
-            raise ValueError("Simulation data not yet generated. Call run() before _output_data().")
-
-        self.sim_data.write_data_to_file(self.cfg.timestamp_str, "bsk")
 
 
     @staticmethod
