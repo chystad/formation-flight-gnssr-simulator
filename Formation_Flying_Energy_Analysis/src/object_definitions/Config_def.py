@@ -13,11 +13,12 @@ from object_definitions.Satellite_def import Satellite
 from object_definitions.SolarPanel_def import SolarPanel
 from object_definitions.GroundStation_def import GroundStation
 from object_definitions.MonteCarloConfig_def import MonteCarloConfig
-from constants import (OUTPUT_DATA_ROOT_DIR, SINGLE_OUTPUT_DATA_DIR_NAME, BATCH_OUTPUT_DATA_DIR_NAME)
+from constants import (OVERRIDE_CONFIG_DIR, OUTPUT_DATA_ROOT_DIR, 
+                       SINGLE_OUTPUT_DATA_DIR_NAME, BATCH_OUTPUT_DATA_DIR_NAME)
 
 
 class Config:
-    def __init__(self, config_file_path: str, mc_cfg: MonteCarloConfig, run_idx: int) -> None:
+    def __init__(self, base_config_path: str, mc_cfg: MonteCarloConfig, run_idx: int) -> None:
         """
         =========================================================================================================
         [WORK IN PROGRESS]
@@ -25,7 +26,7 @@ class Config:
         Perform checks to ensure all parameters are received as expected. 
 
         INPUTS:
-           config_file_path                    
+           base_config_path                    
         
         ATTRIBUTES:
             mc_enabled (bool):                  If Monte Carlo simulation is enabled/disabled (TODO: This will impact 
@@ -53,9 +54,9 @@ class Config:
         # Load cofig file #
         ###################
         if (not mc_cfg.mc_enabled) or (run_idx == 0):
-            cfg = self.read(config_file_path)
+            cfg = self.read(base_config_path)
         else:
-            cfg = self._resolve_base_override(config_file_path, mc_cfg, run_idx)
+            cfg = self._resolve_base_override(base_config_path, mc_cfg, run_idx)
         
         ##################################################
         # Fetch global simulation parameters config file #
@@ -176,6 +177,7 @@ class Config:
         ##############################
         # Monte Carlo
         self.mc_enabled: bool = mc_cfg.mc_enabled
+        self.mc_dir_name: str = mc_cfg.mc_dir_name
         self.run_idx: int = run_idx
         
         # Simulation
@@ -246,7 +248,7 @@ class Config:
         self.useMoon3rdBody: bool = useMoon3rdBody
 
         # Save a combined config under OUTPUT_DATA_SAVE_DIR
-        self.save_config(config_file_path)
+        self.save_config(base_config_path)
 
 
     def read(self, config_file_path: str) -> dict:
@@ -261,7 +263,7 @@ class Config:
     
 
     def _resolve_base_override(self,
-                               base_config_file_path: str,
+                               base_config_path: str,
                                mc_cfg: MonteCarloConfig,
                                run_idx: int
                                ) -> dict:
@@ -273,15 +275,15 @@ class Config:
         Unspecified fields remain equal to the base config.
         """
 
-        base_cfg = self.read(base_config_file_path)
+        base_cfg = self.read(base_config_path)
 
-        # Single run or run_000 uses pure base config
-        if not mc_cfg.mc_enabled or run_idx == 0:
+        # return base config is single run is enabled or this is the first Bsk run in MC
+        if (not mc_cfg.mc_enabled) or (run_idx == 0):
             return base_cfg
-
-        override_path = Path(
-            f"Formation_Flying_Energy_Analysis/configs/run_overrides/run_{run_idx:03d}.yaml"
-        )
+        
+        run_name = self._get_run_name(mc_cfg.mc_enabled, run_idx)
+        override_filename = f"{run_name}.yaml"
+        override_path = OVERRIDE_CONFIG_DIR / override_filename
 
         if not override_path.is_file():
             raise FileNotFoundError(
@@ -316,35 +318,107 @@ class Config:
 
         return merged
     
+
+    def _get_run_name(self, mc_enabled: bool, run_idx: int) -> str:
+        """
+        Get override config name for this Bsk run inside Monte Carlo
+        """
+        if mc_enabled:
+            return f"run_{run_idx:03d}"
+        else:
+            return "error"
     
-    def save_config(self, config_file_path: str) -> None:
+    
+    def save_config(self, base_config_path: str) -> None:
         """
-        Save the config file as:
-            <repo_root>/Bsk_Skf_Propagation_Comparison/output_data/sim_data/<timestamp_str>_cfg.yaml
+        Write config files to output directory. 
+        
+        The file output from this method follows the following logic:
+
+        if Monte Carlo is enabled:            
+            if first run, write:
+                copy of base to:         'output_data/batch_runs/Monte_Carlo_<timestamp>/base.yaml'
+                empty override to:       'output_data/batch_runs/Monte_Carlo_<timestamp>/run_000/run_000_override.yaml'
+            else, write:
+                copy of run override to: 'output_data/batch_runs/Monte_Carlo_<timestamp>/run_XXX/run_XXX_override.yaml'
+        else (single run is enabled):
+            write:
+                copy of base to:         'output_data/single_runs/<timestamp>_cfg.yaml'
+                
         """
+
+        def _write_raw_text_to_path(raw_text: str, out_path: Path) -> None:
+            # Add blank lines between sections for readability. Also helps standard formatting
+            out_text = (raw_text.rstrip() + "\n")
+
+            # Write the out text to out path
+            with open(out_path, "w") as f_out:
+                f_out.write(out_text)
+
+
         # Ensure output directory exists
         self.output_data_save_dir.mkdir(parents=True, exist_ok=True)
-
-        # Build output path using timestamp_str from this Config instance
-        out_path = self.output_data_save_dir / f"{self.timestamp_str}_cfg.yaml"
-
-        # Config paths
-        default_cfg_path = Path(config_file_path)
         
-        # Read raw text from each config file in the specified order
-        with open(default_cfg_path, "r") as f_default:
-            default_text = f_default.read()
+        # Build config output file name for single run configuration
+        out_single_base_file_name = f"{self.timestamp_str}_cfg.yaml"
+        
+        # Build base/override input/output names for Monte Carlo configuration
+        run_name = self._get_run_name(self.mc_enabled, self.run_idx)
+        read_mc_override_file_name = f"{run_name}.yaml"
+        out_mc_override_file_name = f"{run_name}_override.yaml" # override output filename
+        out_mc_base_file_name = "base.yaml"
 
-        # Combine texts: default, then skyfield, then basilisk
-        # Add blank lines between sections for readability
-        out_text = (
-            default_text.rstrip() + "\n")
+        
+        # Read config file to copy, and write to appropriate location depending on run idx and if MC is enabled
+        if self.mc_enabled:
 
-        # Write combined config snapshot
-        with open(out_path, "w") as f_out:
-            f_out.write(out_text)
+            override_mc_out_path = self.output_data_save_dir / out_mc_override_file_name
 
-        logging.info(f"[CFG] Config snapshot written to: {out_path}")
+            # Write empty override file in 'Monte_Carlo_<timestamp>/run_000/' 
+            # AND write base.yaml to current MC root 'Monte_Carlo_<timestamp>/'
+            if self.run_idx == 0:
+                override_raw_text = ""
+                _write_raw_text_to_path(override_raw_text, override_mc_out_path)
+
+                # Build path to ouput file in MC root 'Monte_Carlo_<timestamp>/'
+                base_mc_out_path     = OUTPUT_DATA_ROOT_DIR / BATCH_OUTPUT_DATA_DIR_NAME / self.mc_dir_name / out_mc_base_file_name
+
+                # Read raw text from base config
+                with open(Path(base_config_path), "r") as cfg:
+                    base_raw_text = cfg.read()
+
+                _write_raw_text_to_path(base_raw_text, base_mc_out_path)
+
+                logging.debug(f"""[CFG] Empty override written to:    '{override_mc_out_path}' and\n"""
+                              f"""      copy of base.yaml written to: '{base_mc_out_path}""")
+                print(f"""[CFG] Empty override written to:    '{override_mc_out_path}' and\n"""
+                              f"""      copy of base.yaml written to: '{base_mc_out_path}""")
+
+
+            # Copy current override file from 'configs/' to current run output folder
+            else:
+                override_read_path = OVERRIDE_CONFIG_DIR / read_mc_override_file_name
+                with open(override_read_path, "r") as cfg:
+                    override_raw_text = cfg.read()
+
+                _write_raw_text_to_path(override_raw_text, override_mc_out_path)
+
+                logging.debug(f"[CFG] Copy of {read_mc_override_file_name} written to: '{override_mc_out_path}'")
+                print(f"[CFG] Copy of {read_mc_override_file_name} written to: '{override_mc_out_path}'")
+
+
+        # Write a copy of base.yaml to 'single_runs/'
+        else:
+            base_single_out_path = self.output_data_save_dir / out_single_base_file_name
+            
+            # Read raw text from base config
+            with open(Path(base_config_path), "r") as cfg:
+                base_raw_text = cfg.read()
+
+            _write_raw_text_to_path(base_raw_text, base_single_out_path)
+            
+            logging.debug(f"[CFG] Copy of override written to: '{base_single_out_path}'")
+            print(f"[CFG] Copy of override written to: '{base_single_out_path}'")        
     
 
     def _build_output_data_save_dir(self,
