@@ -32,6 +32,7 @@ from object_definitions.SimData_def import (SpacecraftSimData, MissionSimData)
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimDataWriter_def import SimDataWriter
+from object_definitions.FormationControlStack_def import FormationControlStack
 from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
@@ -43,7 +44,7 @@ VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_
 ENV_RATE: float = 0.5 # Update rate for environment models
 DYN_RATE: float = 0.5 # Update rate for dynamical models
 FSW_RATE: float = 0.5 # Update rate for flight software stack
-REL_NAV_RATE: float = 0.5 # TODO: Update rate for the formation flight stack 
+FORM_CTRL_RATE: float = 0.5 # TODO: Update rate for the formation flight stack 
 MSIS_RATE: float = 30. # Update rate for MSIS input parameters
 
 HIGH_SAMPLE_RATE: float = 0.5 # NOTE: Must be integer multilple of 'DYN_RATE'
@@ -116,7 +117,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             |---cmdTorqueRecorder [10]
             |---rwMotorTorqueRecorder [10]
     |
-    |---FormationNavProcess
+    |---FormationControlProcess
         |
         |---TODO
     """
@@ -135,7 +136,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.envRateNanos: int =    macros.sec2nano(ENV_RATE)
         self.dynRateNanos: int =    macros.sec2nano(DYN_RATE)
         self.fswRateNanos: int =    macros.sec2nano(FSW_RATE)
-        self.relNavRateNanos: int = macros.sec2nano(REL_NAV_RATE)
+        self.formCtrlRateNanos: int = macros.sec2nano(FORM_CTRL_RATE)
         self.msisRateNanos: int =   macros.sec2nano(MSIS_RATE)
 
         self.highSampleRateNanos: int = macros.sec2nano(HIGH_SAMPLE_RATE)
@@ -166,6 +167,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.integrators = []
         self.envModel: BasiliskEnvironmentModel
         self.envProcess: simulationArchTypes.ProcessBaseClass
+        self.formationControlStack: Optional[FormationControlStack] = None
+        self.formationControlProcess: simulationArchTypes.ProcessBaseClass
         
         self.dynProcesses: list[Optional[simulationArchTypes.ProcessBaseClass]] = [None] * self.numSatellites
         self.dynProcessNames: list[Optional[str]] = [None] * self.numSatellites
@@ -191,7 +194,13 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
             # Add bundle to stable list
             self.scRuntimeBundles[sat_idx] = scRuntimeBundle
-        
+
+
+        # ------------------------------------------------------------------
+        # 4) Formation control
+        # ------------------------------------------------------------------
+        if self.cfg.form_enabled:
+            self.formationControlStack = self._build_formation_control()
 
         # ------------------------------------------------------------------
         # 3) Visualization
@@ -362,7 +371,22 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         )
 
         return scRuntimeBundle
+    
 
+    def _build_formation_control(self) -> FormationControlStack:
+        """
+        
+        """
+        self.formationControlProcessName = "FormationControlProcess"
+        self.formationControlProcess = self.CreateNewProcess(self.formationControlProcessName)
+
+        formationControl =  FormationControlStack(
+            sim=self,
+            cfg=self.cfg,
+            scRuntimeBundles=[b for b in self.scRuntimeBundles if b is not None], # filters out None
+        )
+
+        return formationControl
 
 
 

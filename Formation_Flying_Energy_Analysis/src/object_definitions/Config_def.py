@@ -70,6 +70,17 @@ class Config:
         all_sat_params =                cfg['SATELLITES'] # dict[str, dict[str, Any]]
         all_gs_params =                 cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
 
+        # Formation control parameters
+        form_enabled =                  cfg['FORMATION_CONTROL']['form_enabled']
+        form_type =             str(    cfg['FORMATION_CONTROL']['form_type'])
+        form_pos_tolerance =    float(  cfg['FORMATION_CONTROL']['form_pos_tolerance'])
+        form_vel_tolerance =    float(  cfg['FORMATION_CONTROL']['form_vel_tolerance'])
+        dwell_time =            float(  cfg['FORMATION_CONTROL']['dwell_time'])
+        cat_const_separation =  float(  cfg['FORMATION_CONTROL']['constant_along_track']['cat_const_separation'])
+        cpo_radial_amp =        float(  cfg['FORMATION_CONTROL']['circular_projected_orbit']['cpo_radial_amp'])
+        cpo_cross_track_amp =        float(  cfg['FORMATION_CONTROL']['circular_projected_orbit']['cpo_cross_track_amp'])
+        cpo_phase_deg =        float(  cfg['FORMATION_CONTROL']['circular_projected_orbit']['cpo_phase_deg'])        
+
         # Electrical power system parameters (same for all satellites)
         bat_storage_capacity =  float(  cfg['EPS_PARAMETERS']['bat_storage_capacity'])
         init_bat_charge =       float(  cfg['EPS_PARAMETERS']['init_bat_charge'])
@@ -126,6 +137,8 @@ class Config:
         # Perform checks to ensure parameters are received as expected #
         ################################################################      
 
+        # TODO: Validate formation control parameters
+        
         # Validate RW parameters
         self.validate_rw_parameters(
             RW_model, 
@@ -195,6 +208,17 @@ class Config:
 
         # Ground stattions
         self.ground_stations: list[GroundStation] = ground_stations
+
+        # Formation control parameters
+        self.form_enabled: bool = form_enabled
+        self.form_type: str = form_type
+        self.form_pos_tolerance: float = form_pos_tolerance
+        self.form_vel_tolerance: float = form_vel_tolerance
+        self.dwell_time: float = dwell_time
+        self.cat_const_separation: float = cat_const_separation
+        self.cpo_radial_amp: float = cpo_radial_amp
+        self.cpo_cross_track_amp: float = cpo_cross_track_amp
+        self.cpo_phase_deg: float = cpo_phase_deg
 
         # EPS parameters
         self.bat_storage_capacity: float = bat_storage_capacity

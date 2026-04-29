@@ -1,7 +1,7 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 4 # [hours] 
+  simulationDuration: 0.5 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 2
@@ -78,6 +78,23 @@ SATELLITES:
       10000, 0, 0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.1], [0.], [0.]] 
+
+# TODO
+FORMATION_CONTROL:
+  form_enabled: true
+  form_type: "constant_along_track"  # TODO "constant_along_track" or "circular_projected_orbit"
+  leader_mode: "leader_sat" # TODO Might remove to just be decided by 'form_type' "leader_sat" or "common_point"
+  form_pos_tolerance: 25.0 # [m] TODO
+  form_vel_tolerance: 0.02 # [m/s] TODO
+  dwell_time: 300.0 # [s] TODO
+
+  constant_along_track:
+    cat_const_separation: 1000.0 # [m] TODO
+
+  circular_projected_orbit:
+    cpo_radial_amp: 500.0 # [m] TODO
+    cpo_cross_track_amp: 500.0 # [m] TODO
+    cpo_phase_deg: 90.0 # [deg] TODO
 
 # Ground station parameters
 GROUND_STATIONS:
