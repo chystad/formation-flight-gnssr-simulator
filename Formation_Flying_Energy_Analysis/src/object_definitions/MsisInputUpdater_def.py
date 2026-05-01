@@ -10,8 +10,8 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros
 
 from object_definitions.Config_def import Config
+from constants import SPACE_WEATHER_DATA_FILE_PATH
 
-SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
 MSIS_SW_KEYS: list[str] = [
     "ap_24_0",      # 24 hour ap avg. ending now
     "ap_3_0",       # 3 hour ap avg. ending now
