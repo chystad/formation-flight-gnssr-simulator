@@ -2,14 +2,16 @@ import os
 import logging
 from typing import Dict
 from datetime import datetime, timezone, date, timedelta
+from dataclasses import dataclass
+from dataclasses_json import dataclass_json
 
 from Basilisk import __path__
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros
 
 from object_definitions.Config_def import Config
-from object_definitions.SimData_def import (SpaceWeatherDay, SPACE_WEATHER_DATA_FILE_PATH)
 
+SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
 MSIS_SW_KEYS: list[str] = [
     "ap_24_0",      # 24 hour ap avg. ending now
     "ap_3_0",       # 3 hour ap avg. ending now
@@ -35,6 +37,15 @@ MSIS_SW_KEYS: list[str] = [
     "f107_1944_0",   # 81-day avg of f107adj
     "f107_24_-24",   # previous day's f107adj
 ]
+
+@dataclass_json
+@dataclass
+class SpaceWeatherDay:
+    """One UTC day of space-weather data from Kp_ap_Ap_SN_F107_since_2010.txt."""
+    ap: list[int]        # 8x 3-hour ap values: [00-03, 03-06, ..., 21-24]
+    Ap: int              # daily Ap
+    f107obs: float       # adjusted F10.7
+    f107adj: float       # observed F10.7
 
 
 class MsisInputUpdater(sysModel.SysModel):
