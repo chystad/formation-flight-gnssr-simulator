@@ -62,9 +62,6 @@ class FormationControlStack:
                  cfg: Config,
                  scRuntimeBundles: list[SpacecraftRuntimeBundle]) -> None:
         
-        
-        
-        
         self.scheduler = _FormationControlScheduler(self)
         self.sim = sim
         self.cfg = cfg
@@ -109,6 +106,27 @@ class FormationControlStack:
         ]
         self.thrustOnTimeS: list[float] = [0.0] * self.numSatellites
 
+        # Output messages for Fsw and thruster effector
+        self.form_att_ref_out_msgs: list[messaging.AttRefMsg] = []
+        self.form_thr_cmd_out_msgs: list[messaging.THRArrayOnTimeCmdMsg] = []
+
+        # Populate initial output messages
+        for sat_idx in range(self.numSatellites):
+            att_msg = messaging.AttRefMsg()
+            att_payload = messaging.AttRefMsgPayload()
+            att_payload.sigma_RN = [0.0, 0.0, 0.0]
+            att_payload.omega_RN_N = [0.0, 0.0, 0.0]
+            att_payload.domega_RN_N = [0.0, 0.0, 0.0]
+            att_msg.write(att_payload)
+
+            thr_msg = messaging.THRArrayOnTimeCmdMsg()
+            thr_payload = messaging.THRArrayOnTimeCmdMsgPayload()
+            thr_payload.OnTimeRequest = [0.0]
+            thr_msg.write(thr_payload)
+
+            self.form_att_ref_out_msgs.append(att_msg)
+            self.form_thr_cmd_out_msgs.append(thr_msg)
+        
         # TODO: Recorders can be added later after converting status/commands to messages.
         self.formationStatusRecorder: Optional[BasiliskRecorder] = None
 
@@ -119,6 +137,20 @@ class FormationControlStack:
             f"[{self.logTag}] FormationControlStack initialized with "
             f"{self.numSatellites} spacecrafts, with formation type '{self.cfg.form_type}'"
         )
+    
+    
+    
+    
+    ###########################
+    # Public helper functions #
+    ###########################
+    
+    def connect_form_ctrl_cmds_to_fsw(self) -> None:
+        """
+        
+        """
+
+            
 
 
 
@@ -134,6 +166,7 @@ class FormationControlStack:
         Read all spacecraft states, evaluate formation error, decide if burns are needed,
         and expose formation-achieved status and per-follower burn commands.
         """
+
         dt = self._compute_dt(CurrentSimNanos)
 
         states = self._read_all_sc_states()
@@ -150,7 +183,7 @@ class FormationControlStack:
         self.thrustOnTimeS[0] = 0.0
         self.burnAttitudeMrp[0] = np.zeros(3)
 
-        # Compute formation-control burns for remainding follower satellites
+        # Compute formation-control attitude and burns for remainding follower satellites
         for sat_idx in range(1, self.numSatellites):
             follower_r_N, follower_v_N = states[sat_idx]
 
@@ -223,6 +256,8 @@ class FormationControlStack:
         self.maxVelocityErrorMps = max(vel_errors) if vel_errors else 0.0
         self.formationAchieved = all_followers_achieved
 
+        self._write_output_messages()
+
         self.lastUpdateNanos = CurrentSimNanos
 
 
@@ -244,9 +279,9 @@ class FormationControlStack:
                 m.Reset(CurrentSimNanos)
 
 
-    #######################
-    # Private GNC methods #
-    #######################
+    #################################
+    # Private Formation GNC methods #
+    #################################
 
     def _desired_constant_along_track_rtn(self, 
                                           sat_idx: int, 
@@ -267,7 +302,7 @@ class FormationControlStack:
         desired_separation = sat_idx * self.cfg.cat_const_separation
 
         # Angle between the leader position vector and the relative position vector from leader to follower
-        psi = np.acos(desired_separation**2 / 2*r_chief_norm*desired_separation)
+        psi = np.acos((desired_separation**2) / (2*r_chief_norm*desired_separation))
 
         # Angle between normal plane defined by the leaders RTN 'r' vector (radial direction) and the relative position vector from leader to follower
         theta = np.pi/2 - psi
@@ -379,6 +414,44 @@ class FormationControlStack:
     ##########################
     # Private helper methods #
     ##########################
+
+    def _write_output_messages(self) -> None:
+        """
+        Publish the latest formation-control burn attitude and thruster on-time
+        commands for each spacecraft.
+
+        Leader index 0 receives no burn command.
+        """
+
+        for sat_idx in range(self.numSatellites):
+
+            # -----------------------------
+            # Attitude reference output
+            # -----------------------------
+            att_payload = messaging.AttRefMsgPayload()
+
+            if sat_idx == 0:
+                att_payload.sigma_RN = [0.0, 0.0, 0.0]
+            else:
+                att_payload.sigma_RN = self.burnAttitudeMrp[sat_idx].tolist()
+
+            att_payload.omega_RN_N = [0.0, 0.0, 0.0]
+            att_payload.domega_RN_N = [0.0, 0.0, 0.0]
+
+            self.form_att_ref_out_msgs[sat_idx].write(att_payload)
+
+            # -----------------------------
+            # Thruster command output
+            # -----------------------------
+            thr_payload = messaging.THRArrayOnTimeCmdMsgPayload()
+
+            if sat_idx == 0 or not self.burnRequired[sat_idx]:
+                thr_payload.OnTimeRequest = [0.0]
+            else:
+                thr_payload.OnTimeRequest = [float(self.thrustOnTimeS[sat_idx])]
+
+            self.form_thr_cmd_out_msgs[sat_idx].write(thr_payload)
+
 
     def _compute_dt(self, CurrentSimNanos: int) -> float:
         """
