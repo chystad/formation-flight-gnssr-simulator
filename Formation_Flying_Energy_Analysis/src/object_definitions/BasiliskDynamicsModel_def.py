@@ -40,6 +40,7 @@ BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent
 from object_definitions.Config_def import Config
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
+# from object_definitions.FormationControlStack_def import FormationControlStack
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
@@ -207,7 +208,7 @@ class BasiliskDynamicsModel:
     # Public helper functions #
     ###########################
 
-    def connect_fsw(self, fsw: FswStack) -> None:
+    def connect_fsw_cmd_to_rw_effector(self, fsw: FswStack) -> None:
         """
         Connect the computed FSW RW torque to the RW effector
         TODO: Connect the computed thrust to the thruster effector
@@ -216,10 +217,28 @@ class BasiliskDynamicsModel:
         assert self.rwEffector is not None
         self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
 
-        # TODO: Uncomment once FSW has been expanded to output thruster commands
-        # # Subscribe thruster to firing commands from the FSW
-        # assert self.thrusterEffector is not None
-        # self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
+    
+    # def connect_form_ctrl_cmds_to_thr_effector(self, formationControl: FormationControlStack) -> None:
+    #     """
+    #     [DEPRECIATED]
+    #     """
+    #     pass
+
+    #     # TODO: Uncomment once FSW has been expanded to output thruster commands
+    #     # # Subscribe thruster to firing commands from the FSW
+    #     # assert self.thrusterEffector is not None
+    #     # self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
+
+    #     assert self.thrusterEffector is not None
+    #     self.thrusterEffector.cmdsInMsg.subscribeTo(
+    #         formationControl.form_thr_cmd_out_msgs[self.sat_idx]
+    #     )
+
+
+    def connect_fsw_thr_cmd_to_thr_effector(self, fsw: FswStack) -> None:
+
+        assert self.thrusterEffector is not None
+        self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
 
 
 
@@ -703,18 +722,34 @@ class BasiliskDynamicsModel:
               If so, the RW torque must be collected from FSW.
         """
         # Relevant Sample rates
-        highSampleRateNanos = self.sim.highSampleRateNanos
+        lowSampleRateNanos = self.sim.lowSampleRateNanos
         midSampleRateNanos = self.sim.midSampleRateNanos
+        highSampleRateNanos = self.sim.highSampleRateNanos
+
+        # Set recorder sample rates
+        thrusterStateRate = highSampleRateNanos
+        fuelTankStateRate = highSampleRateNanos
+        rwStateRate = highSampleRateNanos
+        rwPowerRate = highSampleRateNanos
+        batteryStateRate = midSampleRateNanos
+        obcPowerSinkRate = midSampleRateNanos
+        solarPanelPowerRate = midSampleRateNanos
+        rwSpeedRate = highSampleRateNanos
         
         # Verify that rates are exact multiples of dynRate
-        if highSampleRateNanos % self.sim.dynRateNanos != 0.0:
-            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
+        if lowSampleRateNanos % self.sim.dynRateNanos != 0.0:
+            raise ValueError("'lowSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
                              "This would have caused inconsistent sampling intervals. "
-                             "Change 'HIGH_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
+                             "Change 'LOW_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
         if midSampleRateNanos % self.sim.dynRateNanos != 0.0:
             raise ValueError("'midSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
                              "This would have caused inconsistent sampling intervals. "
                              "Change 'MID_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
+        if highSampleRateNanos % self.sim.dynRateNanos != 0.0:
+            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'dynRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'HIGH_SAMPLE_RATE' and/or 'DYN_RATE' to fix this error")
+        
             
         # Validate that all necessary modules have been initialized
         assert self.thrusterEffector is not None
@@ -725,24 +760,32 @@ class BasiliskDynamicsModel:
         assert self.rwFactory is not None
         
         # Thruster and fuel recorders
-        self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(highSampleRateNanos) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (opThrustTorquePntB_B) [Nm]
-        self.fuelTankStateRecorder = self.fuelTankEffector.fuelTankOutMsg.recorder(highSampleRateNanos) # attribute: fuelMass [kg]
+        self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(thrusterStateRate) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (thrustTorquePntB_B) [Nm]
+        self.thrusterStateRecorder_RateNanos = thrusterStateRate
+        self.fuelTankStateRecorder = self.fuelTankEffector.fuelTankOutMsg.recorder(fuelTankStateRate) # attribute: fuelMass [kg]
+        self.fuelTankStateRecorder_RateNanos = fuelTankStateRate
 
         # RW power recorders
         for i in range(self.numRWs):
-            rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(highSampleRateNanos) # Omega [rad/s] + u_current [Nm]
-            rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(highSampleRateNanos) # netPower [W]
+            rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(rwStateRate) # Omega [rad/s] + u_current [Nm]
+            rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(rwPowerRate) # netPower [W]
             self.rwStateRecorders.append(rwStateRec)
             self.rwPowerRecorders.append(rwPowRec)
+        self.rwStateRecorder_RateNanos = rwStateRate
+        self.rwPowerRecorder_RateNanos = rwPowerRate
 
         # Other Power modules recorders
-        self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(midSampleRateNanos) # storageLevel [Ws] + currentNetPower [W]
-        self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(midSampleRateNanos) # netPower [W]
+        self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(batteryStateRate) # storageLevel [Ws] + currentNetPower [W]
+        self.batteryStateRecorder_RateNanos = batteryStateRate
+        self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(obcPowerSinkRate) # netPower [W]
+        self.obcPowerSinkRecorder_RateNanos = obcPowerSinkRate
         for i in range(self.numSPs):
-            spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(midSampleRateNanos) # netPower [W]
+            spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(solarPanelPowerRate) # netPower [W]
             self.solarPanelPowerRecorders.append(spPowRec)
+        self.solarPanelPowerRecorder_RateNanos = solarPanelPowerRate
 
         # RW speed recorder (use instead of rwStateRecorders if only RW speeds are necessary)
-        # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(highSampleRateNanos) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel
+        # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(rwSpeedRate) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel
+        # self.rwSpeedRecorder_RateNanos = rwSpeedRate
 
         logging.debug(f"[{self.logTag}] Dynamics recorders initialized for '{self.scObj.ModelTag}'")
