@@ -28,6 +28,7 @@ from Basilisk.utilities import SimulationBaseClass, simulationArchTypes, macros,
 from Basilisk.simulation import spacecraft
 
 from object_definitions.Config_def import Config
+from object_definitions.SimData_def import SimData
 from object_definitions.SimData_def import (SpacecraftSimData, MissionSimData)
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
@@ -41,15 +42,15 @@ from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentM
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
 
 # Model rates [sec] TODO: Move to Config
-ENV_RATE: float = 0.5 # Update rate for environment models
-DYN_RATE: float = 0.5 # Update rate for dynamical models
-FSW_RATE: float = 0.5 # Update rate for flight software stack
-FORM_CTRL_RATE: float = 0.5 # TODO: Update rate for the formation flight stack 
-MSIS_RATE: float = 30. # Update rate for MSIS input parameters
+ENV_RATE: float = 0.5 # [s/update] Update rate for environment models
+DYN_RATE: float = 0.5 # [s/update] Update rate for dynamical models
+FSW_RATE: float = 0.5 # [s/update] Update rate for flight software stack
+FORM_CTRL_RATE: float = 0.5 # [s/update] TODO: Update rate for the formation flight stack 
+MSIS_RATE: float = 30. # [s/update] Update rate for MSIS input parameters
 
-HIGH_SAMPLE_RATE: float = 0.5 # NOTE: Must be integer multilple of 'DYN_RATE'
-MID_SAMPLE_RATE: float = 5. # NOTE: Must be integer multilple of 'DYN_RATE'
-LOW_SAMPLE_RATE: float = 30. # NOTE: Must be integer multilple of 'DYN_RATE'
+HIGH_SAMPLE_RATE: float = 0.5 # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
+MID_SAMPLE_RATE: float = 5. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
+LOW_SAMPLE_RATE: float = 30. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
 
 
 class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
@@ -149,9 +150,13 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self._simStartDt = datetime.strptime(self.cfg.startTime, "%d.%m.%Y %H:%M:%S").replace(tzinfo=timezone.utc)
         self._simEndDt = self._simStartDt + timedelta(hours=float(self.cfg.simulationDuration))
 
-        self.simulationTimeStepNanos = macros.sec2nano(self.cfg.deltaT)
-        self.simulationDurationSec = float(self.cfg.simulationDuration) * 60.0 * 60.0
-        self.simulationDurationNanos = macros.sec2nano(self.simulationDurationSec)
+        self.simulationTimeStepNanos: int = macros.sec2nano(self.cfg.deltaT)
+        self.simulationDurationSec: float = float(self.cfg.simulationDuration) * 60.0 * 60.0
+        self.simulationDurationNanos: int = macros.sec2nano(self.simulationDurationSec)
+
+        self.expectedHighRateSamples: int = (self.simulationDurationNanos // self.highSampleRateNanos) + 1
+        self.expectedMidRateSamples: int = (self.simulationDurationNanos // self.midSampleRateNanos) + 1
+        self.expectedLowRateSamples: int = (self.simulationDurationNanos // self.lowSampleRateNanos) + 1
 
         # Number of data points and recorder sampling time
         numDataPoints = self.simulationDurationNanos // self.simulationTimeStepNanos
@@ -314,7 +319,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         missionSimData: MissionSimData # TODO
 
         # Extract data for each spacecraft
-        scSimDataList = self._pull_every_spacecraft_data()
+        simData = SimData()
+        scSimDataList = simData.pull_every_spacecraft_data(self.scRuntimeBundles)
 
         # Write data to files using a 'SimDataWriter' helper object
         dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
@@ -601,204 +607,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             )
 
         logging.debug("[BSK] Vizard configured")
-        return self.viz
-    
-
-    def _pull_single_spacecraft_data(self, scRuntimeBundle: SpacecraftRuntimeBundle) -> SpacecraftSimData:
-        """
-        Pull all relevant data fields from the recorders in SpacecraftRuntimeBundle.
-
-        Returns:
-            SpacecraftSimData: Data container for one spacecraft
-        """
-        
-        dynModel = scRuntimeBundle.dynModel
-        fsw = scRuntimeBundle.fsw
-
-        # ------------------------------------------
-        # FSW-owned data extraction
-        # ------------------------------------------
-
-        # Ensure that all FSW recorders described in FswStack._setup_fsw_recorders()
-        # are available before extracting data.
-        assert fsw.navTransRecorder is not None
-        assert fsw.navAttRecorder is not None
-        assert fsw.attRefRecorder is not None
-        assert fsw.attErrRecorder is not None
-        assert fsw.cmdTorqueRecorder is not None
-        assert fsw.rwMotorTorqueRecorder is not None
-        
-        # Translational states
-        r_BN_N_data = (
-            fsw.navTransRecorder.r_BN_N,
-            fsw.navTransRecorder_RateNanos * macros.NANO2SEC,
-            len(fsw.navTransRecorder.r_BN_N)
-        )
-        v_BN_N_data = (
-            fsw.navTransRecorder.v_BN_N,
-            fsw.navTransRecorder_RateNanos * macros.NANO2SEC,
-            len(fsw.navTransRecorder.v_BN_N))
-
-        # Spacecraft attitude states
-        sigma_BN_data = (
-            fsw.navAttRecorder.sigma_BN,
-            fsw.navAttRecorder_RateNanos * macros.NANO2SEC,
-            len(fsw.navAttRecorder.sigma_BN))
-        omega_BN_B_data = (
-            fsw.navAttRecorder.omega_BN_B,
-            fsw.navAttRecorder_RateNanos * macros.NANO2SEC,
-            len(fsw.navAttRecorder.omega_BN_B))
-
-        # Desired attitude states
-        sigma_RN_data = (
-            fsw.attRefRecorder.sigma_RN,
-            fsw.attRefRecorder_RateNanos * macros.NANO2SEC)
-        omega_RN_N_data = (
-            fsw.attRefRecorder.omega_RN_N,
-            fsw.attRefRecorder_RateNanos * macros.NANO2SEC)
-
-        # Attitude tracking errors
-        sigma_BR_data = (
-            fsw.attErrRecorder.sigma_BR,
-            fsw.attErrRecorder_RateNanos * macros.NANO2SEC)
-        omega_BR_B_data = (
-            fsw.attErrRecorder.omega_BR_B,
-            fsw.attErrRecorder_RateNanos * macros.NANO2SEC)
-
-        # Control outputs
-        torqueRequestBody_data = (
-            fsw.cmdTorqueRecorder.torqueRequestBody,
-            fsw.cmdTorqueRecorder_RateNanos * macros.NANO2SEC)
-        motorTorque_data = (
-            fsw.rwMotorTorqueRecorder.motorTorque,
-            fsw.rwMotorTorqueRecorder_RateNanos * macros.NANO2SEC)
-
-
-
-        # ------------------------------------------
-        # Dynamics-owned data extraction
-        # ------------------------------------------
-
-        assert dynModel.thrusterStateRecorder is not None
-        assert dynModel.fuelTankStateRecorder is not None
-        assert dynModel.batteryStateRecorder is not None
-        assert dynModel.obcPowerSinkRecorder is not None
-        assert len(dynModel.rwStateRecorders) == dynModel.numRWs
-        assert len(dynModel.rwPowerRecorders) == dynModel.numRWs
-        assert len(dynModel.solarPanelPowerRecorders) == dynModel.numSPs
-
-        # Thruster state
-        thrustForce_B_data = (
-            dynModel.thrusterStateRecorder.thrustForce_B,
-            dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC)
-        thrustBlowDownFactor_data = (
-            dynModel.thrusterStateRecorder.thrustBlowDownFactor,
-            dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC)
-        ispBlowDownFactor_data = (
-            dynModel.thrusterStateRecorder.ispBlowDownFactor,
-            dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC)
-        opThrustTorquePntB_B_data = (
-            dynModel.thrusterStateRecorder.thrustTorquePntB_B,
-            dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC)
-
-        # Fuel tank state
-        fuelMass_data = (
-            dynModel.fuelTankStateRecorder.fuelMass,
-            dynModel.fuelTankStateRecorder_RateNanos * macros.NANO2SEC)
-
-        # Reaction wheel states, one array per RW
-        rwOmega_data = (
-            [rec.Omega for rec in dynModel.rwStateRecorders],
-            dynModel.rwStateRecorder_RateNanos * macros.NANO2SEC)
-        rwUCurrent_data = (
-            [rec.u_current for rec in dynModel.rwStateRecorders],
-            dynModel.rwStateRecorder_RateNanos * macros.NANO2SEC)
-
-        # Reaction wheel power consumption, one array per RW
-        rwNetPower_data = (
-            [rec.netPower for rec in dynModel.rwPowerRecorders],
-            dynModel.rwPowerRecorder_RateNanos * macros.NANO2SEC)
-
-        # Battery state
-        storageLevel_data = (
-            dynModel.batteryStateRecorder.storageLevel,
-            dynModel.batteryStateRecorder_RateNanos * macros.NANO2SEC,
-            len(dynModel.batteryStateRecorder.storageLevel))
-        currentNetPower_data = (
-            dynModel.batteryStateRecorder.currentNetPower,
-            dynModel.batteryStateRecorder_RateNanos * macros.NANO2SEC)
-
-        # OBC power sink
-        obcNetPower_data = (
-            dynModel.obcPowerSinkRecorder.netPower,
-            dynModel.obcPowerSinkRecorder_RateNanos * macros.NANO2SEC)
-
-        # Solar panel power generation, one array per solar panel
-        solarPanelNetPower_data = (
-            [rec.netPower for rec in dynModel.solarPanelPowerRecorders],
-            dynModel.solarPanelPowerRecorder_RateNanos * macros.NANO2SEC)
-
-        # scSimData = SpacecraftSimData(
-        #     r_BN_N_data=r_BN_N_data,
-        #     v_BN_N_data=v_BN_N_data,
-        #     sigma_BN_data=sigma_BN_data,
-        #     omega_BN_B_data=omega_BN_B_data,
-        #     sigma_RN_data=sigma_RN_data,
-        #     omega_RN_N_data=omega_RN_N_data,
-        #     sigma_BR_data=sigma_BR_data,
-        #     omega_BR_B_data=omega_BR_B_data,
-        #     torqueRequestBody_data=torqueRequestBody_data,
-        #     motorTorque_data=motorTorque_data,
-        #     thrustForce_B_data=thrustForce_B_data,
-        #     thrustBlowDownFactor_data=thrustBlowDownFactor_data,
-        #     ispBlowDownFactor_data=ispBlowDownFactor_data,
-        #     opThrustTorquePntB_B_data=opThrustTorquePntB_B_data,
-        #     fuelMass_data=fuelMass_data,
-        #     rwOmega_data=rwOmega_data,
-        #     rwUCurrent_data=rwUCurrent_data,
-        #     rwNetPower_data=rwNetPower_data,
-        #     storageLevel_data=storageLevel_data,
-        #     currentNetPower_data=currentNetPower_data,
-        #     obcNetPower_data=obcNetPower_data,
-        #     solarPanelNetPower_data=solarPanelNetPower_data,
-        # )
-
-
-
-        # TODO: Add rest of the per-spacecraft fields
-
-        # TODO: Bundle all spacecraft data into container
-        scSimData = SpacecraftSimData(
-            TODO=True
-        )
-
-        return scSimData
-    
-
-    def _pull_every_spacecraft_data(self) -> list[SpacecraftSimData]:
-        """
-        Pull data from each spacecraft
-
-        Returns:
-            list[SpacecraftSimData]: data from list index #i corresponds to spacecraft #sat_idx data
-        """
-        
-        # Local data containers for spacecraft and mission data
-        scSimDataList: list[SpacecraftSimData] = []
-        
-        # Extract per-spacecraft data from recorders
-        for i in range(len(self.scRuntimeBundles)):
-            scRuntimeBundle = self.scRuntimeBundles[i]
-
-            # Validate satellite order
-            assert scRuntimeBundle is not None
-            if i != scRuntimeBundle.sat_idx:
-                raise ValueError(f"Index mismatch between element #{i} in scRuntimeBundles and it satellite index #{scRuntimeBundle.sat_idx}")
-
-            scSimData = self._pull_single_spacecraft_data(scRuntimeBundle)
-            scSimDataList.append(scSimData)
-
-        return scSimDataList
+        return self.viz  
     
     
     def _extract_scObjs_from_scRuntimeBundles(self) -> list[spacecraft.Spacecraft]:
