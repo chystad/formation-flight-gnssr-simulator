@@ -24,8 +24,13 @@ if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
     # on the "high-level" orchestrator
     from object_definitions.BasiliskSimulator_def import BasiliskSimulator 
+    from object_definitions.FormationControlStack_def import FormationControlStack
 
 LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
+
+BURN_ATT_TOLERANCE: float = 0.01 # MRP norm
+BURN_RATE_TOLERANCE: float = 0.01 # rate norm
+
 MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
@@ -45,6 +50,8 @@ class PointingMode(str, Enum):
     CHARGE = "charge"
     CAPTURE = "capture"
     FORM_CAPTURE = "form_capture" # TODO: Placeholder mode for when
+    BURN_TRANSIT = "burn_transit"
+    BURN = "burn"
     EMERGENCY = "emergency"
     ERROR = "error"
 
@@ -124,6 +131,7 @@ class FswStack():
         self.sat = sat
         self.sat_idx = sat_idx
         self.scModelTag = scModelTag
+        self.formEnabled = sim.cfg.form_enabled
         self.batStateMsg = bat_state_msg
         self.gsAccessMsgs = gs_access_msgs
         self.gsStateMsgs = gs_state_msgs
@@ -141,8 +149,15 @@ class FswStack():
         self.fswTaskName = f"FswTask_{sat_idx}"
         sim.fswProcesses[sat_idx].addTask(sim.CreateNewTask(self.fswTaskName, sim.fswRateNanos)) # type: ignore
 
-        # Initialize mode switching log file
-        self._log_mode_switching_logic(write_header_only=True)
+        # Read burn attitude and thrust request from FormationControlStack
+        self.formAttRefInMsg: Optional[messaging.AttRefMsg] = None
+        self.formThrCmdInMsg: Optional[messaging.THRArrayOnTimeCmdMsg] = None
+
+        # Initialize output thruster command
+        self.thrOnTimeCmdOutMsg = messaging.THRArrayOnTimeCmdMsg()
+        thr_payload = messaging.THRArrayOnTimeCmdMsgPayload()
+        thr_payload.OnTimeRequest = [0.0]
+        self.thrOnTimeCmdOutMsg.write(thr_payload)
 
         # Recorders owned by this class
         self.navTransRecorder: Optional[BasiliskRecorder] = None          # Position, velocity
@@ -152,7 +167,9 @@ class FswStack():
         self.cmdTorqueRecorder: Optional[BasiliskRecorder] = None         # Commanded body torque
         self.rwMotorTorqueRecorder: Optional[BasiliskRecorder] = None     # RW motor torques
         
-        
+        # Initialize mode switching log file
+        self._log_mode_switching_logic(write_header_only=True)
+
         # -------------------------------------------------
         # Internal FSW modules
         # -------------------------------------------------
@@ -178,6 +195,9 @@ class FswStack():
             0, 0, 1,
         ]
 
+        # Exposed output for wiring fsw to the dynamics model
+        self.rwMotorTorqueOutMsg = self.rw_map.rwMotorTorqueOutMsg
+
         # Vehicle config msg
         vehicle_config_out = messaging.VehicleConfigMsgPayload(ISCPntB_B=sat.I_B)
         self._vc_msg = messaging.VehicleConfigMsg().write(vehicle_config_out)
@@ -200,9 +220,6 @@ class FswStack():
         self.rw_map.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.rw_map.vehControlInMsg.subscribeTo(self.ctrl.cmdTorqueOutMsg)
 
-        # Exposed output for wiring fsw to the dynamics model
-        self.rwMotorTorqueOutMsg = self.rw_map.rwMotorTorqueOutMsg
-
         # Initialize the fsw recorders
         self._setup_fsw_recorders()
 
@@ -218,14 +235,30 @@ class FswStack():
         logging.debug(f"[{self.logTag}] Created FSW stack for '{self.scModelTag}'")
 
 
+    ###########################
+    # Public helper functions #
+    ###########################
+    
+    def connect_form_ctrl_cmds_to_fsw(self, formationControl: FormationControlStack) -> None:
+        """
+        
+        """
+        self.formAttRefInMsg = formationControl.form_att_ref_out_msgs[self.sat_idx]
+        self.formThrCmdInMsg = formationControl.form_thr_cmd_out_msgs[self.sat_idx]
+
+
+
+    ##############################
+    # SysModel Scheduler methods #
+    ##############################
+
     def _modules(self):
         return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
 
 
     def _update_state(self, CurrentSimNanos: int) -> None:
         """
-        Same functionality as old UpdateState(), but FswStack is no longer
-        itself the scheduled SysModel.
+        Run all modules
         """
         self.nav.UpdateState(CurrentSimNanos)
         self._eval_pointing_mode(CurrentSimNanos)
@@ -253,6 +286,11 @@ class FswStack():
             if hasattr(m, "Reset"):
                 m.Reset(CurrentSimNanos)
 
+
+
+    ################################
+    # Private pointing GNC methods #
+    ################################
     
     def _coast_desired_att(self) -> NDArray[np.float64]:
         """
@@ -422,6 +460,10 @@ class FswStack():
         
         old_pointing_mode = self.pointingMode
         
+        # Initialize logical parameters dependent on burn request from FormationControlStack
+        burnRequested = False # True if the thrusters are required to run more than XXX seconds to maintain formation
+        burnAttitudeReached = False  # True if attitude is close enough to requested burn attitude
+        
         # NOTE: Is this even needed if all parameters are assigned during runtime anyway? 
         # Initialize position-dependent logical parameters 
         canCap = False # TODO
@@ -436,8 +478,8 @@ class FswStack():
 
         # Initialize time-dependent logical parameters
         maxNoCom = False # True if the duration since exiting COMMS last time exceeds a max threshold
-
-
+        
+        
         # ---- Decide if the spacecraft can charge (set canChar) ---- 
         # Fraction of illumination due to eclipse. 0 = fully shadowed, 1 = fully illuminated.
         shadowFac = self.sunEclipseMsg.read().shadowFactor 
@@ -504,6 +546,16 @@ class FswStack():
             maxNoCom = False
 
 
+        # ---- Decide if spacecraft burn is requested, and if so, is the requested attitude reached (set burnRequested, burnAttitudeReached) ---- #
+        if self.formEnabled:
+            burnRequested = self._formation_burn_requested()
+            if burnRequested:
+                burnAttitudeReached = self._burn_attitude_reached()
+        else:
+            burnRequested = False
+            burnAttitudeReached = False
+
+
         # ---- Set helper logical parameters for readability and easier easier debugging ---- # 
         if canCom and comBat:
             comPossible = True
@@ -519,6 +571,15 @@ class FswStack():
         # ---- Mode switching logic ---- #
         if critBat or (self.pointingMode == PointingMode.EMERGENCY and not exitEmergencyFlag):
                 nextMode = PointingMode.EMERGENCY
+
+        # Override normal pointing operations with burn pointing
+        elif burnRequested: 
+            if burnAttitudeReached:
+                nextMode = PointingMode.BURN
+            else:
+                nextMode = PointingMode.BURN_TRANSIT
+
+        # Normal formation-independent operations
         elif not maxNoCom:
             if capPossible:
                 nextMode = PointingMode.CAPTURE
@@ -548,23 +609,55 @@ class FswStack():
             if old_pointing_mode == PointingMode.COMMS:
                 self.lastCommsNanos = CurrentSimNanos
                 hoursSinceLastComms = 0.
-            
-            
+
+
+            # Temp:
+            # req = self.formThrCmdInMsg.read() # type: ignore
+
+            # payload = messaging.THRArrayOnTimeCmdMsgPayload()
+            # payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
-            self._log_mode_switching_logic(
-                currentSimMins=currentSimMins,
-                old_pointing_mode=old_pointing_mode,
-                new_pointing_mode=self.pointingMode,
-                hoursSinceLastComms=hoursSinceLastComms,
-                batStorageFrac=batStorageFrac,
-                canChar=canChar,
-                canCom=canCom,
-                comBat=comBat,
-                canCap=canCap,
-                capBat=capBat,
-                critBat=critBat,
-                maxNoCom=maxNoCom,
-                emergencyExitFlag=exitEmergencyFlag,
+            if self.formEnabled:
+                self._log_mode_switching_logic(
+                    currentSimMins=currentSimMins,
+                    old_pointing_mode=old_pointing_mode,
+                    new_pointing_mode=self.pointingMode,
+                    hoursSinceLastComms=hoursSinceLastComms,
+                    batStorageFrac=batStorageFrac,
+                    canChar=canChar,
+                    canCom=canCom,
+                    comBat=comBat,
+                    canCap=canCap,
+                    capBat=capBat,
+                    critBat=critBat,
+                    maxNoCom=maxNoCom,
+                    emergencyExitFlag=exitEmergencyFlag,
+                    formAttRefInMsg=self.formAttRefInMsg.read().sigma_RN, # type: ignore
+                    formThrCmdInMsg=self.formThrCmdInMsg.read(), # type: ignore
+                    thrOnTimeCmdOutMsg=None,
+                    burnRequested=burnRequested,
+                    burnAttitudeReached=burnAttitudeReached,
+            )
+            else:
+                self._log_mode_switching_logic(
+                    currentSimMins=currentSimMins,
+                    old_pointing_mode=old_pointing_mode,
+                    new_pointing_mode=self.pointingMode,
+                    hoursSinceLastComms=hoursSinceLastComms,
+                    batStorageFrac=batStorageFrac,
+                    canChar=canChar,
+                    canCom=canCom,
+                    comBat=comBat,
+                    canCap=canCap,
+                    capBat=capBat,
+                    critBat=critBat,
+                    maxNoCom=maxNoCom,
+                    emergencyExitFlag=exitEmergencyFlag,
+                    formAttRefInMsg=None,
+                    formThrCmdInMsg=None,
+                    thrOnTimeCmdOutMsg=None,
+                    burnRequested=burnRequested,
+                    burnAttitudeReached=burnAttitudeReached,
             )
     
     
@@ -574,7 +667,9 @@ class FswStack():
         """
         self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
-        # TODO: Compute and apply the actual correct pointing orientation based on the current pointingMode
+        # Default: no thrust command given unless given by BURN mode.
+        self._publish_zero_thruster_cmd()
+
         match self.pointingMode:
             case PointingMode.COAST:
                 self.guid.sigma_R0N = self._coast_desired_att()
@@ -588,12 +683,116 @@ class FswStack():
             case PointingMode.CAPTURE:
                 self.guid.sigma_R0N = self._capture_desired_att()
 
+            case PointingMode.BURN_TRANSIT:
+                att_ref = self._read_form_att_ref()
+                if att_ref is not None:
+                    self.guid.sigma_R0N = list(att_ref.sigma_RN)
+                else:
+                    self.guid.sigma_R0N = [0.0, 0.0, 0.0]
+
+            case PointingMode.BURN:
+                att_ref = self._read_form_att_ref()
+                if att_ref is not None:
+                    self.guid.sigma_R0N = list(att_ref.sigma_RN)
+                else:
+                    self.guid.sigma_R0N = [0.0, 0.0, 0.0]
+                self._publish_requested_thruster_cmd()
+            
             case PointingMode.EMERGENCY:
                 self.guid.sigma_R0N = self._emergency_desired_att()
 
             case _:
                 logging.debug(f"[{self.logTag}] Undefined pointing mode '{self.pointingMode}' reached for '{self.scModelTag}'")
                 raise ValueError("")
+            
+
+    def _read_form_thr_cmd(self):
+        if self.formThrCmdInMsg is None:
+            return None
+        return self.formThrCmdInMsg.read()
+
+
+    def _read_form_att_ref(self):
+        if self.formAttRefInMsg is None:
+            return None
+        return self.formAttRefInMsg.read()
+
+    
+    def _read_form_att_ref_sigma(self) -> list[float]:
+        """
+        Only used for logging
+        """
+        if not self.formEnabled or self.formAttRefInMsg is None:
+            return [0.0, 0.0, 0.0]
+
+        try:
+            return list(self.formAttRefInMsg.read().sigma_RN)
+        except Exception:
+            return [0.0, 0.0, 0.0]
+    
+    
+    def _formation_burn_requested(self) -> bool:
+        """
+        True if FormationControlStack requests a nonzero burn for this spacecraft.
+        False if formation control is disabled, thrust cmd isn't initialized, 
+        """
+        if not self.formEnabled or self.formThrCmdInMsg is None:
+            return False
+
+        try:
+            cmd = self._read_form_thr_cmd()
+            if cmd is None:
+                return False
+            return any(float(t) > 0.0 for t in cmd.OnTimeRequest)
+        except:
+            logging.debug(f"[{self.logTag}] Formaton control is enabled, but method failed to read thrust command from Formation control")
+            return False
+        
+
+    def _burn_attitude_reached(self) -> bool:
+        """
+        True if current attitude tracking error is small enough to safely fire thruster.
+        Uses the attTrackingError output from the previous FSW cycle.
+        """
+        try:
+            att_err = self.att_err.attGuidOutMsg.read()
+            sigma_BR = np.array(att_err.sigma_BR, dtype=float)
+            omega_BR_B = np.array(att_err.omega_BR_B, dtype=float)
+
+            burn_att_reached = bool(np.linalg.norm(sigma_BR) <= BURN_ATT_TOLERANCE)
+            burn_rate_reached = bool(np.linalg.norm(omega_BR_B) <= BURN_RATE_TOLERANCE)
+
+            return burn_att_reached and burn_rate_reached
+        
+        except Exception:
+            logging.debug(f"[{self.logTag}] Failed to determine if required burn attitude has been reached")
+            return False
+        
+    
+    def _publish_zero_thruster_cmd(self) -> None:
+        payload = messaging.THRArrayOnTimeCmdMsgPayload()
+        payload.OnTimeRequest = [0.0]
+        self.thrOnTimeCmdOutMsg.write(payload)
+
+
+    def _publish_requested_thruster_cmd(self) -> None:
+        """
+        Forward the requested burn command from FormationControlStack to the dynamics thruster effector.
+        """
+        if not self.formEnabled or self.formThrCmdInMsg is None:
+            self._publish_zero_thruster_cmd()
+            return
+
+        req = self._read_form_thr_cmd()
+
+        payload = messaging.THRArrayOnTimeCmdMsgPayload()
+        if req is None:
+            payload.OnTimeRequest = [0.0]
+        else:
+            payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
+            
+
+        self.thrOnTimeCmdOutMsg.write(payload)
         
     
     def _log_mode_switching_logic(
@@ -611,6 +810,11 @@ class FswStack():
         critBat: Optional[bool] = None,
         maxNoCom: Optional[bool] = None,
         emergencyExitFlag: Optional[bool] = None,
+        formAttRefInMsg: Optional[list] = None,
+        formThrCmdInMsg: Optional[float] = None,
+        thrOnTimeCmdOutMsg: Optional[list[float]] = None,
+        burnRequested: Optional[bool] = None,
+        burnAttitudeReached: Optional[bool] = None,
         write_header_only: bool = False,
     ) -> None:
         """
@@ -640,6 +844,12 @@ class FswStack():
             "critBat",
             "maxNoCom",
             "emergencyExitFlag",
+            "formAttRefInMsg",
+            "formThrCmdInMsg",
+            "thrOnTimeCmdOutMsg",
+            "burnRequested",
+            "burnAttitudeReached"
+
         ]
 
         row = [
@@ -657,6 +867,11 @@ class FswStack():
             critBat,
             maxNoCom,
             emergencyExitFlag,
+            formAttRefInMsg,
+            formThrCmdInMsg,
+            thrOnTimeCmdOutMsg,
+            burnRequested,
+            burnAttitudeReached,
         ]
 
         file_exists = filepath.exists()
@@ -686,6 +901,11 @@ class FswStack():
                 critBat,
                 maxNoCom,
                 emergencyExitFlag,
+                formAttRefInMsg,
+                formThrCmdInMsg,
+                thrOnTimeCmdOutMsg,
+                burnRequested,
+                burnAttitudeReached,
             ]
 
             writer.writerow(row)
@@ -705,29 +925,48 @@ class FswStack():
         """
 
         # Relevant Sample rates
-        highSampleRateNanos = self.sim.highSampleRateNanos
         lowSampleRateNanos = self.sim.lowSampleRateNanos
+        midSampleRateNanos = self.sim.midSampleRateNanos
+        highSampleRateNanos = self.sim.highSampleRateNanos
+
+        # Set recorder sample rates
+        navTransRate = lowSampleRateNanos
+        navAttRate = highSampleRateNanos
+        attRefRate = highSampleRateNanos
+        attErrRate = highSampleRateNanos
+        cmdTorqueRate = highSampleRateNanos
+        rwMotorTorqueRate = highSampleRateNanos
         
         # Verify that rates are exact multiples of dynRate
-        if highSampleRateNanos % self.sim.fswRateNanos != 0.0:
-            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
-                             "This would have caused inconsistent sampling intervals. "
-                             "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
         if lowSampleRateNanos % self.sim.fswRateNanos != 0.0:
             raise ValueError("'lowSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
                              "This would have caused inconsistent sampling intervals. "
                              "Change 'LOW_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+        if midSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'midSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'MID_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+        if highSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
 
         # Spacecraft translational and orientational state recorders
-        self.navTransRecorder = self.nav.transOutMsg.recorder(lowSampleRateNanos) # r_BN_N [m] + v_BN_N [m/s]
-        self.navAttRecorder = self.nav.attOutMsg.recorder(highSampleRateNanos) # sigma_BN [MRP] + omega_BN_B [rad/s]
+        self.navTransRecorder = self.nav.transOutMsg.recorder(navTransRate) # r_BN_N [m] + v_BN_N [m/s]
+        self.navTransRecorder_RateNanos = navTransRate
+        self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
+        self.navAttRecorder_RateNanos = navAttRate
 
         # Desired orientational states and corresponding error
-        self.attRefRecorder = self.guid.attRefOutMsg.recorder(highSampleRateNanos) # sigma_RN [MRP] + omega_RN_N [rad/s]
-        self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(highSampleRateNanos) # sigma_BR [MRP] + omega_BR_B [rad/s]
+        self.attRefRecorder = self.guid.attRefOutMsg.recorder(attRefRate) # sigma_RN [MRP] + omega_RN_N [rad/s]
+        self.attRefRecorder_RateNanos = attRefRate
+        self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(attErrRate) # sigma_BR [MRP] + omega_BR_B [rad/s]
+        self.attErrRecorder_RateNanos = attErrRate
 
         # RW commanded and outputted torque
-        self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(highSampleRateNanos) # torqueRequestBody [Nm]
-        self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(highSampleRateNanos) # motorTorque [Nm]
+        self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(cmdTorqueRate) # torqueRequestBody [Nm]
+        self.cmdTorqueRecorder_RateNanos = cmdTorqueRate
+        self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(rwMotorTorqueRate) # motorTorque [Nm]
+        self.rwMotorTorqueRecorder_RateNanos = rwMotorTorqueRate
 
         logging.debug(f"[{self.logTag}] FSW recorders initialized for '{self.scModelTag}'")
