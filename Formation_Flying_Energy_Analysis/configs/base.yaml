@@ -1,11 +1,12 @@
 # Overall simulation settings
 SIMULATION:
-  startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 0.5 # [hours] 
+  startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
+  simulationDuration: 1 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 2
+  num_satellites: 3
   sat_init_source: "oe" # [oe, vec]
+  data_mode: "debug" # "optimized" for fewer recorders and long time horizons, "debug" for all recorders and short time horizons
 
 # Satellite parameters
 SATELLITES:
@@ -81,7 +82,7 @@ SATELLITES:
 
 # TODO
 FORMATION_CONTROL:
-  form_enabled: true
+  form_enabled: false
   form_type: "constant_along_track"  # TODO "constant_along_track" or "circular_projected_orbit"
   leader_mode: "leader_sat" # TODO Might remove to just be decided by 'form_type' "leader_sat" or "common_point"
   form_pos_tolerance: 25.0 # [m] TODO
@@ -139,7 +140,7 @@ RW_PARAMETERS:
   RW_model: "JitterFullyCoupled"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
   spinUVecs: [[1., 0., 0.],   # Spin axis unit vector in Body frame [x_B, y_B, z_B]
               [0., 1., 0.],   # (Then number of vectors also define the number of RWs)
-              [0., 0., 1.]]
+              [0., 0., 1.],]
   init_rpm: 0.0               # [RPM] initial wheel speed
   max_rpm: 6000.0             # [RPM] max wheel angular velocity
   maxMomentum: 0.015            # [Nms] Maximum momentum storage capacity
@@ -164,7 +165,7 @@ THRUSTER_PARAMETERS:
 
   use_min_pulse_time: false   # [-] Flag if the thruster model should use a minimum impulse time
   min_pulse_time: 0.          # [s] Thruster minimum on time (Requires: use_min_pulse_time == true)
-  max_thrust: 5.              # [N] Maximum thruster force
+  max_thrust: 0.1              # [N] Maximum thruster force
   thrust_blowdown_coeff: [0.] # [-] Vector with polynomial coefficients for fuel mass to thrust blow down model in descending order
   steady_isp: 100.            # [s] Thruster specific impulse/fuel efficiency
   isp_blowdown_coeff: [0.]    # [-] Vector with polynomial coefficients for fuel mass to Isp blow down model in descending order

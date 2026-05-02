@@ -67,6 +67,7 @@ class Config:
         integrator =            str(    cfg['SIMULATION']['integrator'])
         num_satellites =        int(    cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    cfg['SIMULATION']['sat_init_source'])
+        data_mode =             str(    cfg['SIMULATION']['data_mode'])
         all_sat_params =                cfg['SATELLITES'] # dict[str, dict[str, Any]]
         all_gs_params =                 cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
 
@@ -137,6 +138,11 @@ class Config:
         # Perform checks to ensure parameters are received as expected #
         ################################################################      
 
+        # Validate simulation parameters
+        self.validate_sim_parameters(
+            data_mode
+        )
+
         # TODO: Validate formation control parameters
         
         # Validate RW parameters
@@ -202,6 +208,7 @@ class Config:
         self.integrator: str = integrator
         self.num_satellites: int = num_satellites
         self.sat_init_source: str = sat_init_source
+        self.data_mode: str = data_mode
 
         # Satellites
         self.satellites: list[Satellite] = satellites
@@ -860,6 +867,23 @@ class Config:
             solar_panels.append(solar_panel)
 
         return solar_panels               
+
+
+    def validate_sim_parameters(self,
+                                data_mode: str) -> None:
+        """
+        
+        """
+
+        # ============ Check 'data_mode' is type str and is an acceptable string
+        if isinstance(data_mode, str):
+            if not ((data_mode == "debug") or (data_mode == "optimized")):
+                raise ValueError(f"Unexpected value given for 'data_mode'. "
+                                 f"Got '{data_mode}', expected ['debug', 'optimized'])")
+        else: 
+            raise ValueError(f"Unexpected type given for 'data_mode'. "
+                             f"Got '{type(data_mode)}', expected 'str'")
+
 
 
     def validate_rw_parameters(self,
