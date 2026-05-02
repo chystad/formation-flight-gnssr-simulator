@@ -160,7 +160,7 @@ class FswStack():
         self.thrOnTimeCmdOutMsg.write(thr_payload)
 
         # Recorders owned by this class
-        self.navTransRecorder: Optional[BasiliskRecorder] = None          # Position, velocity
+        self.navTransRecorder: BasiliskRecorder          # Position, velocity
         self.navAttRecorder: Optional[BasiliskRecorder] = None            # Attitude, angular rate
         self.attRefRecorder: Optional[BasiliskRecorder] = None            # Desired attitude, desired angular rate
         self.attErrRecorder: Optional[BasiliskRecorder] = None           # Attitude tracking error, angular-rate tracking error
@@ -226,11 +226,12 @@ class FswStack():
         # Add scheduler and recorders to task (Low priority => Executes last)
         sim.AddModelToTask(self.fswTaskName, self.scheduler, 20)
         sim.AddModelToTask(self.fswTaskName, self.navTransRecorder, 10)
-        sim.AddModelToTask(self.fswTaskName, self.navAttRecorder, 10)
-        sim.AddModelToTask(self.fswTaskName, self.attRefRecorder, 10)
-        sim.AddModelToTask(self.fswTaskName, self.attErrRecorder, 10)
-        sim.AddModelToTask(self.fswTaskName, self.cmdTorqueRecorder, 10)
-        sim.AddModelToTask(self.fswTaskName, self.rwMotorTorqueRecorder, 10)
+        if sim.cfg.data_mode == "debug":
+            sim.AddModelToTask(self.fswTaskName, self.navAttRecorder, 10)
+            sim.AddModelToTask(self.fswTaskName, self.attRefRecorder, 10)
+            sim.AddModelToTask(self.fswTaskName, self.attErrRecorder, 10)
+            sim.AddModelToTask(self.fswTaskName, self.cmdTorqueRecorder, 10)
+            sim.AddModelToTask(self.fswTaskName, self.rwMotorTorqueRecorder, 10)
 
         logging.debug(f"[{self.logTag}] Created FSW stack for '{self.scModelTag}'")
 
@@ -930,8 +931,8 @@ class FswStack():
         highSampleRateNanos = self.sim.highSampleRateNanos
 
         # Set recorder sample rates
-        navTransRate = lowSampleRateNanos
-        navAttRate = highSampleRateNanos
+        navTransRate = lowSampleRateNanos # NOTE: This should always be 'lowSampleRateNanos' for 'lowRateTimes' to be correct in SimData._pull_single_spacecraft_data
+        navAttRate = highSampleRateNanos  # NOTE: This should always be 'highSampleRateNanos' for 'highRateTimes' to be correct in SimData._pull_single_spacecraft_data
         attRefRate = highSampleRateNanos
         attErrRate = highSampleRateNanos
         cmdTorqueRate = highSampleRateNanos
@@ -951,22 +952,26 @@ class FswStack():
                              "This would have caused inconsistent sampling intervals. "
                              "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
 
-        # Spacecraft translational and orientational state recorders
+        # Mandetory translational state recorder
         self.navTransRecorder = self.nav.transOutMsg.recorder(navTransRate) # r_BN_N [m] + v_BN_N [m/s]
         self.navTransRecorder_RateNanos = navTransRate
-        self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
-        self.navAttRecorder_RateNanos = navAttRate
+        
+        # Optional 'debug' recorders
+        if self.sim.cfg.data_mode == "debug":
+            # Attitude and angular rate recorder
+            self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
+            self.navAttRecorder_RateNanos =  navAttRate
 
-        # Desired orientational states and corresponding error
-        self.attRefRecorder = self.guid.attRefOutMsg.recorder(attRefRate) # sigma_RN [MRP] + omega_RN_N [rad/s]
-        self.attRefRecorder_RateNanos = attRefRate
-        self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(attErrRate) # sigma_BR [MRP] + omega_BR_B [rad/s]
-        self.attErrRecorder_RateNanos = attErrRate
+            # Desired orientational states and corresponding error
+            self.attRefRecorder = self.guid.attRefOutMsg.recorder(attRefRate) # sigma_RN [MRP] + omega_RN_N [rad/s]
+            self.attRefRecorder_RateNanos = attRefRate
+            self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(attErrRate) # sigma_BR [MRP] + omega_BR_B [rad/s]
+            self.attErrRecorder_RateNanos = attErrRate
 
-        # RW commanded and outputted torque
-        self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(cmdTorqueRate) # torqueRequestBody [Nm]
-        self.cmdTorqueRecorder_RateNanos = cmdTorqueRate
-        self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(rwMotorTorqueRate) # motorTorque [Nm]
-        self.rwMotorTorqueRecorder_RateNanos = rwMotorTorqueRate
+            # RW commanded and outputted torque
+            self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(cmdTorqueRate) # torqueRequestBody [Nm]
+            self.cmdTorqueRecorder_RateNanos = cmdTorqueRate
+            self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(rwMotorTorqueRate) # motorTorque [Nm]
+            self.rwMotorTorqueRecorder_RateNanos = rwMotorTorqueRate
 
         logging.debug(f"[{self.logTag}] FSW recorders initialized for '{self.scModelTag}'")
