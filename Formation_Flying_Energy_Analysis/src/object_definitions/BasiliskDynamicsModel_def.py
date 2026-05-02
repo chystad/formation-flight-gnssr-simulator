@@ -146,11 +146,11 @@ class BasiliskDynamicsModel:
         self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
 
         # Recorders owned by this class
+        self.batteryStateRecorder: BasiliskRecorder    # Battery charge
+        self.fuelTankStateRecorder: BasiliskRecorder   # Remaining propellant
         self.thrusterStateRecorder: Optional[BasiliskRecorder] = None   # Thrust, Isp, max thrust, per thruster
-        self.fuelTankStateRecorder: Optional[BasiliskRecorder] = None   # Remaining propellant
         self.rwStateRecorders: list[BasiliskRecorder] = []              # RW configs and speeds, per RW 
         self.rwPowerRecorders: list[BasiliskRecorder] = []              # RW power consumption, per RW
-        self.batteryStateRecorder: Optional[BasiliskRecorder] = None    # Battery charge
         self.obcPowerSinkRecorder: Optional[BasiliskRecorder] = None    # OBC power consumption
         self.solarPanelPowerRecorders: list[BasiliskRecorder] = []      # Solar panel power generation, per panel
         self.rwSpeedRecorder: Optional[BasiliskRecorder] = None         # (minimal replacement for rwStateRecorders) RW speeds
@@ -190,16 +190,17 @@ class BasiliskDynamicsModel:
             sim.AddModelToTask(self.dynTaskName, rwPower, 20)
 
         # Schedule all recorders to task (lower priority => executes after models)
-        sim.AddModelToTask(self.dynTaskName, self.thrusterStateRecorder, 10)
-        sim.AddModelToTask(self.dynTaskName, self.fuelTankStateRecorder, 10)
-        for i in range(self.numRWs):
-            sim.AddModelToTask(self.dynTaskName, self.rwStateRecorders[i], 10)
-            sim.AddModelToTask(self.dynTaskName, self.rwPowerRecorders[i], 10)
         sim.AddModelToTask(self.dynTaskName, self.batteryStateRecorder, 10)
-        sim.AddModelToTask(self.dynTaskName, self.obcPowerSinkRecorder, 10)
-        for i in range(self.numSPs):
-            sim.AddModelToTask(self.dynTaskName, self.solarPanelPowerRecorders[i], 10)
-        # sim.AddModelToTask(self.dynTaskName, self.rwSpeedRecorder, 10)  
+        sim.AddModelToTask(self.dynTaskName, self.fuelTankStateRecorder, 10)
+        if sim.cfg.data_mode == "debug":
+            sim.AddModelToTask(self.dynTaskName, self.thrusterStateRecorder, 10)
+            for i in range(self.numRWs):
+                sim.AddModelToTask(self.dynTaskName, self.rwStateRecorders[i], 10)
+                sim.AddModelToTask(self.dynTaskName, self.rwPowerRecorders[i], 10)
+            sim.AddModelToTask(self.dynTaskName, self.obcPowerSinkRecorder, 10)
+            for i in range(self.numSPs):
+                sim.AddModelToTask(self.dynTaskName, self.solarPanelPowerRecorders[i], 10)
+            # sim.AddModelToTask(self.dynTaskName, self.rwSpeedRecorder, 10)  
         
 
 
@@ -727,11 +728,11 @@ class BasiliskDynamicsModel:
         highSampleRateNanos = self.sim.highSampleRateNanos
 
         # Set recorder sample rates
-        thrusterStateRate = highSampleRateNanos
+        batteryStateRate = midSampleRateNanos # NOTE: This should always be 'midSampleRateNanos' for 'midRateTimes' to be correct in SimData._pull_single_spacecraft_data
         fuelTankStateRate = highSampleRateNanos
+        thrusterStateRate = highSampleRateNanos
         rwStateRate = highSampleRateNanos
         rwPowerRate = highSampleRateNanos
-        batteryStateRate = midSampleRateNanos
         obcPowerSinkRate = midSampleRateNanos
         solarPanelPowerRate = midSampleRateNanos
         rwSpeedRate = highSampleRateNanos
@@ -758,34 +759,38 @@ class BasiliskDynamicsModel:
         assert self.battery is not None
         assert self.obcPowerSink is not None
         assert self.rwFactory is not None
-        
-        # Thruster and fuel recorders
-        self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(thrusterStateRate) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (thrustTorquePntB_B) [Nm]
-        self.thrusterStateRecorder_RateNanos = thrusterStateRate
+
+        # Mandatory recorders (battery + fuel tank)
+        self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(batteryStateRate) # storageLevel [Ws] + currentNetPower [W]
+        self.batteryStateRecorder_RateNanos = batteryStateRate
         self.fuelTankStateRecorder = self.fuelTankEffector.fuelTankOutMsg.recorder(fuelTankStateRate) # attribute: fuelMass [kg]
         self.fuelTankStateRecorder_RateNanos = fuelTankStateRate
 
-        # RW power recorders
-        for i in range(self.numRWs):
-            rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(rwStateRate) # Omega [rad/s] + u_current [Nm]
-            rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(rwPowerRate) # netPower [W]
-            self.rwStateRecorders.append(rwStateRec)
-            self.rwPowerRecorders.append(rwPowRec)
-        self.rwStateRecorder_RateNanos = rwStateRate
-        self.rwPowerRecorder_RateNanos = rwPowerRate
+        # Optional 'debug' recorders
+        if self.sim.cfg.data_mode == "debug":
+            # Thruster recorder
+            self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(thrusterStateRate) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (thrustTorquePntB_B) [Nm]
+            self.thrusterStateRecorder_RateNanos = thrusterStateRate
 
-        # Other Power modules recorders
-        self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(batteryStateRate) # storageLevel [Ws] + currentNetPower [W]
-        self.batteryStateRecorder_RateNanos = batteryStateRate
-        self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(obcPowerSinkRate) # netPower [W]
-        self.obcPowerSinkRecorder_RateNanos = obcPowerSinkRate
-        for i in range(self.numSPs):
-            spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(solarPanelPowerRate) # netPower [W]
-            self.solarPanelPowerRecorders.append(spPowRec)
-        self.solarPanelPowerRecorder_RateNanos = solarPanelPowerRate
+            # RW power recorders
+            for i in range(self.numRWs):
+                rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(rwStateRate) # Omega [rad/s] + u_current [Nm]
+                rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(rwPowerRate) # netPower [W]
+                self.rwStateRecorders.append(rwStateRec)
+                self.rwPowerRecorders.append(rwPowRec)
+            self.rwStateRecorder_RateNanos = rwStateRate
+            self.rwPowerRecorder_RateNanos = rwPowerRate
 
-        # RW speed recorder (use instead of rwStateRecorders if only RW speeds are necessary)
-        # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(rwSpeedRate) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel
-        # self.rwSpeedRecorder_RateNanos = rwSpeedRate
+            # Other Power modules recorders
+            self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(obcPowerSinkRate) # netPower [W]
+            self.obcPowerSinkRecorder_RateNanos = obcPowerSinkRate
+            for i in range(self.numSPs):
+                spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(solarPanelPowerRate) # netPower [W]
+                self.solarPanelPowerRecorders.append(spPowRec)
+            self.solarPanelPowerRecorder_RateNanos = solarPanelPowerRate
+
+            # RW speed recorder (use instead of rwStateRecorders if only RW speeds are necessary)
+            # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(rwSpeedRate) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel
+            # self.rwSpeedRecorder_RateNanos = rwSpeedRate
 
         logging.debug(f"[{self.logTag}] Dynamics recorders initialized for '{self.scObj.ModelTag}'")
