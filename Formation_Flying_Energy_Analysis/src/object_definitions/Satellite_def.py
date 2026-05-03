@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from typing import Optional
+from typing import Optional, Any
 from numpy.typing import NDArray
 
 from Basilisk.utilities import orbitalMotion
@@ -20,9 +20,7 @@ class Satellite:
             I_B: list[float], # [kg m^2] Inertia of hub about point Bc in B frame components
             r_BP_B: list[int], # Unit vector pointing towards the satellite face with the largest solar panel area expressed in B
             r_BA_B: list[int], # Unit vector pointing towards the satellite face with the communication antennas expressed in B
-            init_OEs: Optional[orbitalMotion.ClassicElements], # Orbital elements used to calculate init cond
-            init_pos: Optional[NDArray[np.float64]], # 3 element pos vec
-            init_vel: Optional[NDArray[np.float64]],  # 3 element vel vec
+            deployment_vel: NDArray[np.float64], # [m/s] satellite deployment velocity from shared deployer
             init_att: list[list[float]], # Orientation of Body relative to Inertial expressed using MRP
             init_angvel: list[list[float]] # Angular velocity og Body relative to Inertial expressed in Body
         ) -> None:
@@ -46,9 +44,6 @@ class Satellite:
         self.I_B: list[float] = I_B
         self.r_BP_B: list[int] = r_BP_B
         self.r_BA_B: list[int] = r_BA_B
-        self.init_OEs: Optional[orbitalMotion.ClassicElements] = init_OEs
-        self.init_pos: Optional[NDArray[np.float64]] = init_pos
-        self.init_vel: Optional[NDArray[np.float64]] = init_vel
+        self.deployment_vel: NDArray[np.float64] = deployment_vel
         self.init_att: list[list[float]] = init_att
         self.init_angvel: list[list[float]] = init_angvel
-
