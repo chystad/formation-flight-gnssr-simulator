@@ -450,8 +450,7 @@ class Config:
 
             _write_raw_text_to_path(base_raw_text, base_single_out_path)
             
-            logging.debug(f"[CFG] Copy of override written to: '{base_single_out_path}'")
-            print(f"[CFG] Copy of override written to: '{base_single_out_path}'")        
+            logging.debug(f"[CFG] Copy of base config written to: '{base_single_out_path}'")     
     
 
     def _build_output_data_save_dir(self,

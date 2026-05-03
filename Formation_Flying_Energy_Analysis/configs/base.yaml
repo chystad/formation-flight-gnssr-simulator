@@ -1,7 +1,7 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 0.5 # [hours] 
+  simulationDuration: 12 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 3
@@ -62,12 +62,12 @@ SATELLITES:
 
 # TODO
 FORMATION_CONTROL:
-  form_enabled: false
+  form_enabled: true
   form_type: "constant_along_track"  # TODO "constant_along_track" or "circular_projected_orbit"
   leader_mode: "leader_sat" # TODO Might remove to just be decided by 'form_type' "leader_sat" or "common_point"
   form_pos_tolerance: 25.0 # [m] TODO
   form_vel_tolerance: 0.02 # [m/s] TODO
-  dwell_time: 300.0 # [s] TODO
+  dwell_time: 300.0 # [s] Time threshold for how long a satellite position and velocity must be withing tolearances to be considered "in formation"
 
   constant_along_track:
     cat_const_separation: 1000.0 # [m] TODO
@@ -117,13 +117,13 @@ EPS_PARAMETERS:
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
 RW_PARAMETERS:
-  RW_model: "JitterFullyCoupled"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
+  RW_model: "BalancedWheels"  # [BalancedWheels, JitterSimple, JitterFullyCoupled]
   spinUVecs: [[1., 0., 0.],   # Spin axis unit vector in Body frame [x_B, y_B, z_B]
               [0., 1., 0.],   # (Then number of vectors also define the number of RWs)
               [0., 0., 1.],]
   init_rpm: 0.0               # [RPM] initial wheel speed
   max_rpm: 6000.0             # [RPM] max wheel angular velocity
-  maxMomentum: 0.015            # [Nms] Maximum momentum storage capacity
+  maxMomentum: 0.03            # [Nms] Maximum momentum storage capacity
   maxTorque: 0.004            # [Nm] Maximum RW motor torque
   minTorque: 0.00001          # [Nm] Minimum RW motor torque
   # I_RW: 1.                  # [kgm^2] RW inertia about spin axis (calculated from maxMomentum, max_rpm)
@@ -136,8 +136,8 @@ RW_PARAMETERS:
 
 # Thruster parameters (same for all satellites)
 THRUSTER_PARAMETERS:
-  thr_pos_B: [1., 0., 0.] # [m] vector with thruster location in B-frame components
-  thr_dir_B: [0., 0., 1.] # [-] Unit vector with thruster force direction
+  thr_pos_B: [-1., 0., 0.] # [m] vector with thruster location in B-frame components
+  thr_dir_B: [1., 0., 0.] # [-] Unit vector with thruster force direction
 
   thr_model_override: "None" # ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
                              # [WARNING] Chosing any of the above values OVERRIDES the thruster params under.
@@ -145,12 +145,12 @@ THRUSTER_PARAMETERS:
 
   use_min_pulse_time: false   # [-] Flag if the thruster model should use a minimum impulse time
   min_pulse_time: 0.          # [s] Thruster minimum on time (Requires: use_min_pulse_time == true)
-  max_thrust: 0.1              # [N] Maximum thruster force
-  thrust_blowdown_coeff: [0.] # [-] Vector with polynomial coefficients for fuel mass to thrust blow down model in descending order
+  max_thrust: 0.1             # [N] Maximum thruster force
+  thrust_blowdown_coeff: [1.] # [-] Vector with polynomial coefficients for fuel mass to thrust blow down model in descending order
   steady_isp: 100.            # [s] Thruster specific impulse/fuel efficiency
-  isp_blowdown_coeff: [0.]    # [-] Vector with polynomial coefficients for fuel mass to Isp blow down model in descending order
+  isp_blowdown_coeff: [1.]    # [-] Vector with polynomial coefficients for fuel mass to Isp blow down model in descending order
   area_nozzle: 0.02           # [m^2 ??] Thruster nozzle exhaust cone exit area
-  thr_mag_disp: 50.           # [% ??] thruster dispersion percentage
+  thr_mag_disp: 0.           # [% ??] thruster dispersion percentage
 
 
 # Magnetorquer parameters (same for all satellites)

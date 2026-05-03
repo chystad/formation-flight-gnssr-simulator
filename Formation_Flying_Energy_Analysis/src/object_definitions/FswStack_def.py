@@ -619,6 +619,8 @@ class FswStack():
             # payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
             if self.formEnabled:
+                cmd = self._read_form_thr_cmd()
+
                 self._log_mode_switching_logic(
                     currentSimMins=currentSimMins,
                     old_pointing_mode=old_pointing_mode,
@@ -634,7 +636,7 @@ class FswStack():
                     maxNoCom=maxNoCom,
                     emergencyExitFlag=exitEmergencyFlag,
                     formAttRefInMsg=self.formAttRefInMsg.read().sigma_RN, # type: ignore
-                    formThrCmdInMsg=self.formThrCmdInMsg.read(), # type: ignore
+                    formThrCmdInMsg=list(cmd.OnTimeRequest) if cmd is not None else None,
                     thrOnTimeCmdOutMsg=None,
                     burnRequested=burnRequested,
                     burnAttitudeReached=burnAttitudeReached,
@@ -669,7 +671,7 @@ class FswStack():
         self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
         # Default: no thrust command given unless given by BURN mode.
-        self._publish_zero_thruster_cmd()
+        self._publish_zero_thruster_cmd(CurrentSimNanos)
 
         match self.pointingMode:
             case PointingMode.COAST:
@@ -697,7 +699,7 @@ class FswStack():
                     self.guid.sigma_R0N = list(att_ref.sigma_RN)
                 else:
                     self.guid.sigma_R0N = [0.0, 0.0, 0.0]
-                self._publish_requested_thruster_cmd()
+                self._publish_requested_thruster_cmd(CurrentSimNanos)
             
             case PointingMode.EMERGENCY:
                 self.guid.sigma_R0N = self._emergency_desired_att()
@@ -770,18 +772,18 @@ class FswStack():
             return False
         
     
-    def _publish_zero_thruster_cmd(self) -> None:
+    def _publish_zero_thruster_cmd(self, CurrentSimNanos: int) -> None:
         payload = messaging.THRArrayOnTimeCmdMsgPayload()
         payload.OnTimeRequest = [0.0]
-        self.thrOnTimeCmdOutMsg.write(payload)
+        self.thrOnTimeCmdOutMsg.write(payload, CurrentSimNanos)
 
 
-    def _publish_requested_thruster_cmd(self) -> None:
+    def _publish_requested_thruster_cmd(self, CurrentSimNanos: int) -> None:
         """
         Forward the requested burn command from FormationControlStack to the dynamics thruster effector.
         """
         if not self.formEnabled or self.formThrCmdInMsg is None:
-            self._publish_zero_thruster_cmd()
+            self._publish_zero_thruster_cmd(CurrentSimNanos)
             return
 
         req = self._read_form_thr_cmd()
@@ -790,10 +792,16 @@ class FswStack():
         if req is None:
             payload.OnTimeRequest = [0.0]
         else:
-            payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
-            
+            payload.OnTimeRequest = [float(req.OnTimeRequest[0])]
 
-        self.thrOnTimeCmdOutMsg.write(payload)
+        # print(
+        #     f"[{self.logTag}] publish thrust command: "
+        #     f"OnTimeRequest={payload.OnTimeRequest}, "
+        #     f"use_min_pulse_time={self.sim.cfg.use_min_pulse_time}, "
+        #     f"min_pulse_time={self.sim.cfg.min_pulse_time}"
+        # )
+            
+        self.thrOnTimeCmdOutMsg.write(payload, CurrentSimNanos)
         
     
     def _log_mode_switching_logic(
@@ -812,7 +820,7 @@ class FswStack():
         maxNoCom: Optional[bool] = None,
         emergencyExitFlag: Optional[bool] = None,
         formAttRefInMsg: Optional[list] = None,
-        formThrCmdInMsg: Optional[float] = None,
+        formThrCmdInMsg: Optional[Any] = None,
         thrOnTimeCmdOutMsg: Optional[list[float]] = None,
         burnRequested: Optional[bool] = None,
         burnAttitudeReached: Optional[bool] = None,

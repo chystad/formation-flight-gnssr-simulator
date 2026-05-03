@@ -23,7 +23,29 @@ def initialize(mc_config_file_path) -> MonteCarloConfig:
         # -------------------------------------------------------------
         
         # TODO
+
+        # # Configure debug logging format
+        # logging.basicConfig(
+        #     format="%(asctime)s    %(message)s",
+        #     datefmt="[%H:%M:%S]",
+        #     level=logging.DEBUG,
+        # )
+
+        # # Only show warnings and errors globally
+        # logging.basicConfig(level=logging.WARNING)
+
+        # # Matplotlib: silence backend + font-manager chatter
+        # mpl.set_loglevel("warning")
+        # logging.getLogger("matplotlib").setLevel(logging.WARNING)
+        # logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+
+        # # Pillow (PIL): silence PNG chunk debug like "STREAM b'IHDR'"
+        # #PngImagePlugin.debug = False
+        # logging.getLogger("PIL").setLevel(logging.WARNING)
+        # logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+
         pass
+
 
     else:
         # -------------------------------------------------------------

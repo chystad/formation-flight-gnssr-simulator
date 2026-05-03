@@ -241,6 +241,8 @@ class BasiliskDynamicsModel:
         assert self.thrusterEffector is not None
         self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
 
+        logging.debug(f"[DYN{self.sat_idx}] thruster subscribed to FSW thr cmd")
+
 
 
 
@@ -599,7 +601,7 @@ class BasiliskDynamicsModel:
         fuelTankEffector.ModelTag = f"{self.scObj.ModelTag}_fuelEff"
         
         fuelTankEffector.setTankModel(fuelTankModel)
-        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.05 # [kg] fraction of the total satellite mass
+        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.5 # [kg] fraction of the total satellite mass
         fuelTankModel.propMassInit = fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
         fuelTankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
         fuelTankEffector.r_TB_B = [[0.0], [0.0], [0.0]]

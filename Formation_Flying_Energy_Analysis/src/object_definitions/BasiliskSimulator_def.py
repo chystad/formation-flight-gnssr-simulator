@@ -207,7 +207,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # 4) Formation control
         # ------------------------------------------------------------------
         if self.cfg.form_enabled:
-            print("Initializeing formation control")
             self.formationControlStack = self._build_formation_control()
 
         # ------------------------------------------------------------------
@@ -263,8 +262,10 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         del dataWriter # free up buffer
 
         # Only create plots after a sim run if in debug mode. Data size will be too large otherwise
-        if self.cfg.data_mode == "debug":
+        if self.cfg.data_mode == "debug" and (not self.cfg.mc_enabled):
             plt.plot_all_formation_plots(scSimDataList)
+            plt.plot_all_thruster_fuel_plots(scSimDataList)
+            plt.mpl.show()
 
         # Release data
         del scSimDataList
@@ -306,7 +307,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # Create dynamics process for the spacecraft and its components/effectors. Assign to persistent lists
         dynProcessName = f"DynamicsProcess_{sat_idx}"
         self.dynProcessNames[sat_idx] = dynProcessName
-        self.dynProcesses[sat_idx] = self.CreateNewProcess(dynProcessName)
+        self.dynProcesses[sat_idx] = self.CreateNewProcess(dynProcessName, 50)
 
         dynModel = BasiliskDynamicsModel(
             sim=self,
@@ -335,7 +336,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # Create FSW process for the spacecraft local GNC system. Assign to persistent lists
         fswProcessName = f"FswProcess_{sat_idx}"
         self.fswProcessNames[sat_idx] = fswProcessName
-        self.fswProcesses[sat_idx] = self.CreateNewProcess(fswProcessName)
+        self.fswProcesses[sat_idx] = self.CreateNewProcess(fswProcessName, 70)
 
         fsw = FswStack(
             sim = self,
@@ -383,7 +384,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         """
         # Create process
         self.formationControlProcessName = "FormationControlProcess"
-        self.formationControlProcess = self.CreateNewProcess(self.formationControlProcessName)
+        self.formationControlProcess = self.CreateNewProcess(self.formationControlProcessName, 300)
 
         # Initialize Formation control stack
         formationControl =  FormationControlStack(

@@ -202,6 +202,7 @@ class FormationControlStack:
             pos_err = float(np.linalg.norm(err_r_RTN))
             vel_err = float(np.linalg.norm(err_v_RTN))
 
+            # True of no control action needed
             inside_tol = (
                 pos_err <= self.cfg.form_pos_tolerance
                 and vel_err <= self.cfg.form_vel_tolerance
@@ -256,7 +257,7 @@ class FormationControlStack:
         self.maxVelocityErrorMps = max(vel_errors) if vel_errors else 0.0
         self.formationAchieved = all_followers_achieved
 
-        self._write_output_messages()
+        self._write_output_messages(CurrentSimNanos)
 
         self.lastUpdateNanos = CurrentSimNanos
 
@@ -310,8 +311,9 @@ class FormationControlStack:
         x_cat_d = -1 * desired_separation * np.sin(theta) # Always negative in the RTN frame if on the same trajector
         y_cat_d = desired_separation * np.cos(theta)
 
-        return np.array([x_cat_d, y_cat_d, 0.0], dtype=float)
-    
+        # return np.array([x_cat_d, y_cat_d, 0.0], dtype=float)
+        return np.array([0., -desired_separation, 0.0], dtype=float) # NOTE: temp
+            
 
     def _constant_along_track_control(
         self,
@@ -335,8 +337,8 @@ class FormationControlStack:
 
         # Position and velocity feedback in RTN.
         # Gains are deliberately small because this maps directly to thruster on-time.
-        k_pos = 2.0e-4   # [1/s]
-        k_vel = 2.0      # [-]
+        k_pos = 5.0   # [1/s]
+        k_vel = 1.0      # [-]
 
         dv_cmd_RTN = -k_pos * err_r_RTN - k_vel * err_v_RTN
 
@@ -415,7 +417,7 @@ class FormationControlStack:
     # Private helper methods #
     ##########################
 
-    def _write_output_messages(self) -> None:
+    def _write_output_messages(self, CurrentSimNanos: int) -> None:
         """
         Publish the latest formation-control burn attitude and thruster on-time
         commands for each spacecraft.
@@ -438,7 +440,7 @@ class FormationControlStack:
             att_payload.omega_RN_N = [0.0, 0.0, 0.0]
             att_payload.domega_RN_N = [0.0, 0.0, 0.0]
 
-            self.form_att_ref_out_msgs[sat_idx].write(att_payload)
+            self.form_att_ref_out_msgs[sat_idx].write(att_payload, CurrentSimNanos)
 
             # -----------------------------
             # Thruster command output
@@ -450,7 +452,7 @@ class FormationControlStack:
             else:
                 thr_payload.OnTimeRequest = [float(self.thrustOnTimeS[sat_idx])]
 
-            self.form_thr_cmd_out_msgs[sat_idx].write(thr_payload)
+            self.form_thr_cmd_out_msgs[sat_idx].write(thr_payload, CurrentSimNanos)
 
 
     def _compute_dt(self, CurrentSimNanos: int) -> float:
