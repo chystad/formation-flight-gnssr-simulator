@@ -262,22 +262,16 @@ class BasiliskDynamicsModel:
         self.scObj.hub.r_BcB_B = [[0.0], [0.0], [0.0]]  # [m] position vector of body-fixed point B relative to CM
         self.scObj.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(self.sat.I_B) # [kg m^2] Inertia of hub about point Bc in B frame components
 
-        # Assign initial conditions
-        if self.cfg.sat_init_source == "oe":
-            # Get initial state vector from orbital elements
-            assert self.envModel.gravFactory is not None
-            oe = self.sat.init_OEs
-            mu = self.envModel.gravFactory.gravBodies["earth"].mu
-            rN, vN = orbitalMotion.elem2rv(mu, oe)
+        # Assign initial conditions from shared deployer OEs
+        assert self.envModel.gravFactory is not None
+        oe = self.cfg.shared_deployer_OEs
+        deployVel = self.sat.deployment_vel
+        mu = self.envModel.gravFactory.gravBodies["earth"].mu
 
-        elif self.cfg.sat_init_source == "vec":
-            # Use initial state given directly from config
-            rN = self.sat.init_pos # [m]   In N frame (inertial = ECI)
-            vN = self.sat.init_vel # [m/s] in N frame (inertial = ECI)
-
-        else:
-            raise ValueError(f"[{self.logTag}] Unrecognized satellite initial condition source '{self.cfg.sat_init_source}'")
-
+        # Convert OEs to initial states and add the deployment velocity
+        rN, vN = orbitalMotion.elem2rv(mu, oe)
+        vN += deployVel 
+ 
         # Set the initial conditions for the spacecraft object
         self.scObj.hub.r_CN_NInit = rN  # [m]   r_BN_N
         self.scObj.hub.v_CN_NInit = vN  # [m/s] v_BN_N
