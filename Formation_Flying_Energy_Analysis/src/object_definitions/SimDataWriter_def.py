@@ -66,7 +66,93 @@ class SimDataWriter:
 
     
     def _write_full_data_to_files(self) -> None:
-        pass
+        """
+        Write full per-spacecraft data to one HDF5 file per satellite.
+
+        File structure:
+            sat_X.h5
+            |
+            |---r_BN_N
+                |---data
+                |---dt_s
+                |---n_samples
+            |
+            |---...
+        """
+
+        self.output_data_save_dir.mkdir(parents=True, exist_ok=True)
+
+        for sat_idx, sc_data in enumerate(self.scSimDataList):
+            out_path = self.output_data_save_dir / f"sat_{sat_idx}.h5"
+
+            with h5py.File(out_path, "w") as h5: 
+                # Mandatory fields
+                self._write_sampled_data_group(h5, "r_BN_N", sc_data.r_BN_N)
+                self._write_sampled_data_group(h5, "v_BN_N", sc_data.v_BN_N)
+                self._write_sampled_data_group(h5, "fuelMass", sc_data.fuelMass)
+                self._write_sampled_data_group(h5, "storageLevel", sc_data.storageLevel)
+                self._write_sampled_data_group(h5, "currentNetPower", sc_data.currentNetPower)
+
+                # Optional debug fields
+                if sc_data.r_scB_leaderB_RTN is not None:
+                    self._write_sampled_data_group(h5, "r_scB_leaderB_RTN", sc_data.r_scB_leaderB_RTN)
+
+                if sc_data.v_scB_leaderB_RTN is not None:
+                    self._write_sampled_data_group(h5, "v_scB_leaderB_RTN", sc_data.v_scB_leaderB_RTN)
+
+                if sc_data.sigma_BN is not None:
+                    self._write_sampled_data_group(h5, "sigma_BN", sc_data.sigma_BN)
+                
+                if sc_data.omega_BN_B is not None:
+                    self._write_sampled_data_group(h5, "omega_BN_B", sc_data.omega_BN_B)
+
+                if sc_data.sigma_RN is not None:
+                    self._write_sampled_data_group(h5, "sigma_RN", sc_data.sigma_RN)
+
+                if sc_data.omega_RN_N is not None:
+                    self._write_sampled_data_group(h5, "omega_RN_N", sc_data.omega_RN_N)
+
+                if sc_data.sigma_BR is not None:
+                    self._write_sampled_data_group(h5, "sigma_BR", sc_data.sigma_BR)
+
+                if sc_data.omega_BR_B is not None:
+                    self._write_sampled_data_group(h5, "omega_BR_B", sc_data.omega_BR_B)
+                
+                if sc_data.cmdTorqueBody is not None:
+                    self._write_sampled_data_group(h5, "cmdTorqueBody", sc_data.cmdTorqueBody)
+                
+                if sc_data.cmdMotorTorque is not None:
+                    self._write_sampled_data_group(h5, "cmdMotorTorque", sc_data.cmdMotorTorque)
+
+                if sc_data.thrustForce_B is not None:
+                    self._write_sampled_data_group(h5, "thrustForce_B", sc_data.thrustForce_B)
+
+                if sc_data.thrustTorquePntB_B is not None:
+                    self._write_sampled_data_group(h5, "thrustTorquePntB_B", sc_data.thrustTorquePntB_B)
+
+                if sc_data.thrustBlowDownFactor is not None:
+                    self._write_sampled_data_group(h5, "thrustBlowDownFactor", sc_data.thrustBlowDownFactor)
+                
+                if sc_data.ispBlowDownFactor is not None:
+                    self._write_sampled_data_group(h5, "ispBlowDownFactor", sc_data.ispBlowDownFactor)
+                
+                if sc_data.rwOmega is not None:
+                    self._write_sampled_data_group(h5, "rwOmega", sc_data.rwOmega)
+                
+                if sc_data.rwUCurrent is not None:
+                    self._write_sampled_data_group(h5, "rwUCurrent", sc_data.rwUCurrent)
+
+                if sc_data.rwNetPower is not None:
+                    self._write_sampled_data_group(h5, "rwNetPower", sc_data.rwNetPower)
+
+                if sc_data.obcNetPower is not None:
+                    self._write_sampled_data_group(h5, "obcNetPower", sc_data.obcNetPower)
+
+                if sc_data.solarPanelNetPower is not None:
+                    self._write_sampled_data_group(h5, "solarPanelNetPower", sc_data.solarPanelNetPower)
+                
+
+            logging.debug(f"[DATA_WRITER] Wrote optimized satellite data to {out_path}")
 
 
 
