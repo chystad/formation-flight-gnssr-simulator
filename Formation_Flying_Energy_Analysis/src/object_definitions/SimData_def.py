@@ -19,54 +19,53 @@ OUTPUT_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/sim_da
 
 @dataclass
 class SampledData:
-    data: NDArray[Any]
-    dt: float
-    n_samples: int
+    data: NDArray[Any] # Data numpy array
+    dt_s: float        # [s] Constant time between samples
+    n_samples: int     # Number of samples
 
 # TODO
 @dataclass 
 class MissionSimData:
     TODO: bool
 
-# TODO
 @dataclass 
 class SpacecraftSimData:
     # Mandetory data
-    r_BN_N: SampledData # (n, 3) [m] B position relative to N, exporessed in N frame
-    v_BN_N: SampledData # (n, 3) [m/s] B velocity relative to N, expressed in N frame
-    fuelMass: SampledData # (n,) [kg] Fuel mass
-    storageLevel: SampledData    # (n,) [Ws] Battery stored charge
-    currentNetPower: SampledData # (n,) [W] Net power received/drained from the battery
+    r_BN_N: SampledData # (n, 3) [m] B position relative to N, exporessed in N frame (float64)
+    v_BN_N: SampledData # (n, 3) [m/s] B velocity relative to N, expressed in N frame (float64)
+    fuelMass: SampledData # (n,) [kg] Fuel mass (float32)
+    storageLevel: SampledData    # (n,) [Ws] Battery stored charge (float32)
+    currentNetPower: SampledData # (n,) [W] Net power received/drained from the battery (float32)
 
     # Post-processed data
-    r_scB_leaderB_RTN: Optional[SampledData] = None # (n, 3) [m] This sc position relative to leader, expressed in RTN frame
-    v_scB_leaderB_RTN: Optional[SampledData] = None # (n, 3) [m/s] This sc velocity relative to leader, expressed in RTN frame
+    r_scB_leaderB_RTN: Optional[SampledData] = None # (n, 3) [m] This sc position relative to leader, expressed in RTN frame (float64)
+    v_scB_leaderB_RTN: Optional[SampledData] = None # (n, 3) [m/s] This sc velocity relative to leader, expressed in RTN frame (float64)
 
     # Optional 'debug' FSW-owned data
-    sigma_BN: Optional[SampledData] = None   # (n, 3) [MRP] Attitude of B relative to N
-    omega_BN_B: Optional[SampledData] = None # (n, 3) [rad/s] Angular rate of B relative to N, expressed in B frame
+    sigma_BN: Optional[SampledData] = None   # (n, 3) [MRP] Attitude of B relative to N (float32)
+    omega_BN_B: Optional[SampledData] = None # (n, 3) [rad/s] Angular rate of B relative to N, expressed in B frame (float32)
 
-    sigma_RN: Optional[SampledData] = None   # (n, 3) [MRP] Desired attitude, R relative to N
-    omega_RN_N: Optional[SampledData] = None # (n, 3) [rad/s] Desired angular rate, R relative to N, expressed in N frame
+    sigma_RN: Optional[SampledData] = None   # (n, 3) [MRP] Desired attitude, R relative to N (float32)
+    omega_RN_N: Optional[SampledData] = None # (n, 3) [rad/s] Desired angular rate, R relative to N, expressed in N frame (float32)
 
-    sigma_BR: Optional[SampledData] = None   # (n, 3) [MRP] Attitude tracking error of B relative to R
-    omega_BR_B: Optional[SampledData] = None # (n, 3) [rad/s] Angular rate tracking error of B relative to R, expressed in B frame
+    sigma_BR: Optional[SampledData] = None   # (n, 3) [MRP] Attitude tracking error of B relative to R (float32)
+    omega_BR_B: Optional[SampledData] = None # (n, 3) [rad/s] Angular rate tracking error of B relative to R, expressed in B frame (float32)
 
-    cmdTorqueBody: Optional[SampledData] = None  # (n,      3) [Nm] Torque command from FSW, expressed in Body
-    cmdMotorTorque: Optional[SampledData] = None # (n, numRWs) [Nm] Torque command from FSW, expressed in RW frame
+    cmdTorqueBody: Optional[SampledData] = None  # (n,      3) [Nm] Torque command from FSW, expressed in Body (float32)
+    cmdMotorTorque: Optional[SampledData] = None # (n, numRWs) [Nm] Torque command from FSW, expressed in RW frame (float32)
 
     # Optional 'debug' Dynamics-owned data
-    thrustForce_B: Optional[SampledData] = None        # (n, 3) [N] Thrust force vector, expressed in B frame
-    thrustTorquePntB_B: Optional[SampledData] = None   # (n, 3) [Nm] Thrust torque about point B, expressed in B frame
-    thrustBlowDownFactor: Optional[SampledData] = None # (n,) [frac/%???] Current thrust percentage due to tank blow down
-    ispBlowDownFactor: Optional[SampledData] = None    # (n,) [frac/%???] Current Isp percentage due to tank blow down
+    thrustForce_B: Optional[SampledData] = None        # (n, 3) [N] Thrust force vector, expressed in B frame (float32)
+    thrustTorquePntB_B: Optional[SampledData] = None   # (n, 3) [Nm] Thrust torque about point B, expressed in B frame (float32)
+    thrustBlowDownFactor: Optional[SampledData] = None # (n,) [frac/%???] Current thrust percentage due to tank blow down (float32)
+    ispBlowDownFactor: Optional[SampledData] = None    # (n,) [frac/%???] Current Isp percentage due to tank blow down (float32)
 
-    rwOmega: Optional[SampledData] = None    # (n, numRWs) [rad/s] Wheel speed
-    rwUCurrent: Optional[SampledData] = None # (n, numRWs) [Nm] Motor torque
-    rwNetPower: Optional[SampledData] = None # (n, numRWs) [W] RW power used/generated ( < 0 => Consume power)
+    rwOmega: Optional[SampledData] = None    # (n, numRWs) [rad/s] Wheel speed (float32)
+    rwUCurrent: Optional[SampledData] = None # (n, numRWs) [Nm] Motor torque (float32)
+    rwNetPower: Optional[SampledData] = None # (n, numRWs) [W] RW power used/generated ( < 0 => Consume power) (float32)
 
-    obcNetPower: Optional[SampledData] = None        # (n,) [W] Net power used/generated
-    solarPanelNetPower: Optional[SampledData] = None # (n, numSPs) [W] Net power used/generated
+    obcNetPower: Optional[SampledData] = None        # (n,) [W] Net power used/generated (float32)
+    solarPanelNetPower: Optional[SampledData] = None # (n, numSPs) [W] Net power used/generated (float32)
 
 @dataclass
 class FormationFollowerStatus:
@@ -125,20 +124,12 @@ class SimData:
             scSimDataList.append(scSimData)
 
             # self._DEBUG_print_spacecraft_sim_data_field_sizes(scRuntimeBundle.sat_idx, scSimData)
+            # self._DEBUG_print_spacecraft_sim_data_field_dtypes(scRuntimeBundle.sat_idx, scSimData)
 
         # Compute and add the RTN relative states for the follower satellites
         self._compute_RTN_leader_relative_states(scSimDataList)
 
         return scSimDataList
-    
-
-    def build_times_s(self, sampleRate_s: float, endTime_s: float) -> NDArray[np.float64]:
-        """
-        TODO
-        Build time vector from sample rate and end time. The time vector will always include t=0, 
-        and t=endTime if (endTime % sampleRate == 0)
-        """
-        return np.asarray([])
     
 
 
@@ -166,11 +157,11 @@ class SimData:
 
         # Translational states
         r_BN_N_data = SampledData(
-            np.asarray(fsw.navTransRecorder.r_BN_N),
+            np.asarray(fsw.navTransRecorder.r_BN_N, dtype=np.float64),
             fsw.navTransRecorder_RateNanos * macros.NANO2SEC,
             len(fsw.navTransRecorder.r_BN_N))
         v_BN_N_data = SampledData(
-            np.asarray(fsw.navTransRecorder.v_BN_N),
+            np.asarray(fsw.navTransRecorder.v_BN_N, dtype=np.float64),
             fsw.navTransRecorder_RateNanos * macros.NANO2SEC,
             len(fsw.navTransRecorder.v_BN_N))
         lowRateTimes = fsw.navTransRecorder.times() # NOTE This recorder is used to fetch LOW sample rate time vector
@@ -178,18 +169,18 @@ class SimData:
 
         # Fuel tank state
         fuelMass_data = SampledData(
-            np.asarray(dynModel.fuelTankStateRecorder.fuelMass),
+            np.asarray(dynModel.fuelTankStateRecorder.fuelMass, dtype=np.float32),
             dynModel.fuelTankStateRecorder_RateNanos * macros.NANO2SEC,
             len(dynModel.fuelTankStateRecorder.fuelMass))
         dynModel.fuelTankStateRecorder.clear()
 
         # Battery state
         storageLevel_data = SampledData(
-            np.asarray(dynModel.batteryStateRecorder.storageLevel),
+            np.asarray(dynModel.batteryStateRecorder.storageLevel, dtype=np.float32),
             dynModel.batteryStateRecorder_RateNanos * macros.NANO2SEC,
             len(dynModel.batteryStateRecorder.storageLevel))
         currentNetPower_data = SampledData(
-            np.asarray(dynModel.batteryStateRecorder.currentNetPower),
+            np.asarray(dynModel.batteryStateRecorder.currentNetPower, dtype=np.float32),
             dynModel.batteryStateRecorder_RateNanos * macros.NANO2SEC,
             len(dynModel.batteryStateRecorder.currentNetPower))
         midRateTimes = dynModel.batteryStateRecorder.times() # NOTE This recorder is used to fetch MID sample rate time vector
@@ -224,11 +215,11 @@ class SimData:
             
             # Spacecraft attitude states
             sigma_BN_data = SampledData(
-                np.asarray(fsw.navAttRecorder.sigma_BN),
+                np.asarray(fsw.navAttRecorder.sigma_BN, dtype=np.float32),
                 fsw.navAttRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.navAttRecorder.sigma_BN))
             omega_BN_B_data = SampledData(
-                np.asarray(fsw.navAttRecorder.omega_BN_B),
+                np.asarray(fsw.navAttRecorder.omega_BN_B, dtype=np.float32),
                 fsw.navAttRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.navAttRecorder.omega_BN_B))
             highRateTimes = dynModel.batteryStateRecorder.times() # NOTE This recorder is used to fetch HIGH sample rate time vector
@@ -236,33 +227,33 @@ class SimData:
 
             # Desired attitude states
             sigma_RN_data = SampledData(
-                np.asarray(fsw.attRefRecorder.sigma_RN),
+                np.asarray(fsw.attRefRecorder.sigma_RN, dtype=np.float32),
                 fsw.attRefRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.attRefRecorder.sigma_RN))
             omega_RN_N_data = SampledData(
-                np.asarray(fsw.attRefRecorder.omega_RN_N),
+                np.asarray(fsw.attRefRecorder.omega_RN_N, dtype=np.float32),
                 fsw.attRefRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.attRefRecorder.omega_RN_N))
             fsw.attRefRecorder.clear()
 
             # Attitude tracking errors
             sigma_BR_data = SampledData(
-                np.asarray(fsw.attErrRecorder.sigma_BR),
+                np.asarray(fsw.attErrRecorder.sigma_BR, dtype=np.float32),
                 fsw.attErrRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.attErrRecorder.sigma_BR))
             omega_BR_B_data = SampledData(
-                np.asarray(fsw.attErrRecorder.omega_BR_B),
+                np.asarray(fsw.attErrRecorder.omega_BR_B, dtype=np.float32),
                 fsw.attErrRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.attErrRecorder.omega_BR_B))
             fsw.attErrRecorder.clear()
 
             # Control outputs
             cmdTorqueBody_data = SampledData(
-                np.asarray(fsw.cmdTorqueRecorder.torqueRequestBody),
+                np.asarray(fsw.cmdTorqueRecorder.torqueRequestBody, dtype=np.float32),
                 fsw.cmdTorqueRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.cmdTorqueRecorder.torqueRequestBody))
             cmdMotorTorque_data = SampledData(
-                np.asarray(fsw.rwMotorTorqueRecorder.motorTorque)[:, :dynModel.numRWs], # default size: (n, 36), reduce to (n, numRWs)
+                np.asarray(fsw.rwMotorTorqueRecorder.motorTorque, dtype=np.float32)[:, :dynModel.numRWs], # default size: (n, 36), reduce to (n, numRWs)
                 fsw.rwMotorTorqueRecorder_RateNanos * macros.NANO2SEC,
                 len(fsw.rwMotorTorqueRecorder.motorTorque))
             fsw.cmdTorqueRecorder.clear()
@@ -283,30 +274,30 @@ class SimData:
 
             # Thruster state
             thrustForce_B_data = SampledData(
-                np.asarray(dynModel.thrusterStateRecorder.thrustForce_B),
+                np.asarray(dynModel.thrusterStateRecorder.thrustForce_B, dtype=np.float32),
                 dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.thrusterStateRecorder.thrustForce_B))
             thrustTorquePntB_B_data = SampledData(
-                np.asarray(dynModel.thrusterStateRecorder.thrustTorquePntB_B),
+                np.asarray(dynModel.thrusterStateRecorder.thrustTorquePntB_B, dtype=np.float32),
                 dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.thrusterStateRecorder.thrustTorquePntB_B))
             thrustBlowDownFactor_data = SampledData(
-                np.asarray(dynModel.thrusterStateRecorder.thrustBlowDownFactor),
+                np.asarray(dynModel.thrusterStateRecorder.thrustBlowDownFactor, dtype=np.float32),
                 dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.thrusterStateRecorder.thrustBlowDownFactor))
             ispBlowDownFactor_data = SampledData(
-                np.asarray(dynModel.thrusterStateRecorder.ispBlowDownFactor),
+                np.asarray(dynModel.thrusterStateRecorder.ispBlowDownFactor, dtype=np.float32),
                 dynModel.thrusterStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.thrusterStateRecorder.ispBlowDownFactor))
             dynModel.thrusterStateRecorder.clear()
             
             # Reaction wheel states, one array per RW
             rwOmega_data = SampledData(
-                np.asarray([rec.Omega for rec in dynModel.rwStateRecorders]).T,
+                np.asarray([rec.Omega for rec in dynModel.rwStateRecorders], dtype=np.float32).T,
                 dynModel.rwStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.rwStateRecorders[0].Omega) if dynModel.numRWs > 0 else 0)
             rwUCurrent_data = SampledData(
-                np.asarray([rec.u_current for rec in dynModel.rwStateRecorders]).T,
+                np.asarray([rec.u_current for rec in dynModel.rwStateRecorders], dtype=np.float32).T,
                 dynModel.rwStateRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.rwStateRecorders[0].u_current) if dynModel.numRWs > 0 else 0)
             for rec in dynModel.rwStateRecorders:
@@ -314,7 +305,7 @@ class SimData:
 
             # Reaction wheel power consumption, one array per RW
             rwNetPower_data = SampledData(
-                np.asarray([rec.netPower for rec in dynModel.rwPowerRecorders]).T,
+                np.asarray([rec.netPower for rec in dynModel.rwPowerRecorders], dtype=np.float32).T,
                 dynModel.rwPowerRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.rwPowerRecorders[0].netPower) if dynModel.numRWs > 0 else 0)
             for rec in dynModel.rwPowerRecorders:
@@ -322,14 +313,14 @@ class SimData:
 
             # OBC power sink
             obcNetPower_data = SampledData(
-                np.asarray(dynModel.obcPowerSinkRecorder.netPower),
+                np.asarray(dynModel.obcPowerSinkRecorder.netPower, dtype=np.float32),
                 dynModel.obcPowerSinkRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.obcPowerSinkRecorder.netPower))
             dynModel.obcPowerSinkRecorder.clear()
 
             # Solar panel power generation, one array per solar panel
             solarPanelNetPower_data = SampledData(
-                np.asarray([rec.netPower for rec in dynModel.solarPanelPowerRecorders]).T,
+                np.asarray([rec.netPower for rec in dynModel.solarPanelPowerRecorders], dtype=np.float32).T,
                 dynModel.solarPanelPowerRecorder_RateNanos * macros.NANO2SEC,
                 len(dynModel.solarPanelPowerRecorders[0].netPower) if dynModel.numSPs > 0 else 0)
             for rec in dynModel.solarPanelPowerRecorders:
@@ -410,12 +401,12 @@ class SimData:
         # Leader itself has zero relative state in its own RTN frame.
         leader.r_scB_leaderB_RTN = SampledData(
             data=np.zeros_like(r_leader_N),
-            dt=leader.r_BN_N.dt,
+            dt_s=leader.r_BN_N.dt_s,
             n_samples=leader.r_BN_N.n_samples,
         )
         leader.v_scB_leaderB_RTN = SampledData(
             data=np.zeros_like(v_leader_N),
-            dt=leader.v_BN_N.dt,
+            dt_s=leader.v_BN_N.dt_s,
             n_samples=leader.v_BN_N.n_samples,
         )
 
@@ -439,16 +430,16 @@ class SimData:
                     f"follower v_BN_N shape {v_follower_N.shape}"
                 )
 
-            if follower.r_BN_N.dt != leader.r_BN_N.dt:
+            if follower.r_BN_N.dt_s != leader.r_BN_N.dt_s:
                 raise ValueError(
                     f"Position sample time mismatch for follower #{sat_idx}. "
-                    f"Leader dt {leader.r_BN_N.dt}, follower dt {follower.r_BN_N.dt}"
+                    f"Leader dt {leader.r_BN_N.dt_s}, follower dt {follower.r_BN_N.dt_s}"
                 )
 
-            if follower.v_BN_N.dt != leader.v_BN_N.dt:
+            if follower.v_BN_N.dt_s != leader.v_BN_N.dt_s:
                 raise ValueError(
                     f"Velocity sample time mismatch for follower #{sat_idx}. "
-                    f"Leader dt {leader.v_BN_N.dt}, follower dt {follower.v_BN_N.dt}"
+                    f"Leader dt {leader.v_BN_N.dt_s}, follower dt {follower.v_BN_N.dt_s}"
                 )
 
             r_rel_N = r_follower_N - r_leader_N
@@ -468,13 +459,13 @@ class SimData:
 
             follower.r_scB_leaderB_RTN = SampledData(
                 data=r_rel_RTN,
-                dt=follower.r_BN_N.dt,
+                dt_s=follower.r_BN_N.dt_s,
                 n_samples=follower.r_BN_N.n_samples,
             )
 
             follower.v_scB_leaderB_RTN = SampledData(
                 data=v_rel_RTN,
-                dt=follower.v_BN_N.dt,
+                dt_s=follower.v_BN_N.dt_s,
                 n_samples=follower.v_BN_N.n_samples,
             )
 
@@ -546,6 +537,16 @@ class SimData:
 
 
 
+
+
+
+
+
+
+
+
+
+
     ##########################
     # Private DEEBUG methods #
     ##########################
@@ -554,6 +555,24 @@ class SimData:
     def _DEBUG_print_spacecraft_sim_data_field_sizes(sat_idx: int, 
                                                      scSimData: SpacecraftSimData
                                                      ) -> None:
+        
+        assert scSimData.sigma_BN is not None
+        assert scSimData.omega_BN_B is not None
+        assert scSimData.sigma_RN is not None
+        assert scSimData.omega_RN_N is not None
+        assert scSimData.sigma_BR is not None
+        assert scSimData.omega_BR_B is not None
+        assert scSimData.cmdTorqueBody is not None
+        assert scSimData.cmdMotorTorque is not None
+        assert scSimData.thrustTorquePntB_B is not None
+        assert scSimData.thrustBlowDownFactor is not None
+        assert scSimData.ispBlowDownFactor is not None
+        assert scSimData.rwOmega is not None
+        assert scSimData.rwUCurrent is not None
+        assert scSimData.rwNetPower is not None
+        assert scSimData.obcNetPower is not None
+        assert scSimData.solarPanelNetPower is not None
+        assert scSimData.thrustForce_B is not None
         logging.debug(f"""
 [DATA] Spacecraft #{sat_idx} data shapes
 
@@ -582,4 +601,89 @@ Dynamics-owned data:
   currentNetPower:     {np.shape(scSimData.currentNetPower.data)}
   obcNetPower:         {np.shape(scSimData.obcNetPower.data)}
   solarPanelNetPower:  {np.shape(scSimData.solarPanelNetPower.data)}
+""")
+        
+    @staticmethod
+    def _DEBUG_print_spacecraft_sim_data_field_dtypes(
+        sat_idx: int,
+        scSimData: SpacecraftSimData,
+    ) -> None:
+        """
+        Print dtype information for all populated SpacecraftSimData fields.
+
+        Optional fields are only accessed after explicit None checks/asserts,
+        so Pylance can recognize that they are populated.
+        """
+
+        logging.debug(f"""
+[DATA] Spacecraft #{sat_idx} data dtypes
+
+Mandatory data:
+  r_BN_N:              {scSimData.r_BN_N.data.dtype}
+  v_BN_N:              {scSimData.v_BN_N.data.dtype}
+  fuelMass:            {scSimData.fuelMass.data.dtype}
+  storageLevel:        {scSimData.storageLevel.data.dtype}
+  currentNetPower:     {scSimData.currentNetPower.data.dtype}
+""")
+
+        # -------------------------------------------------
+        # Post-processed RTN data
+        # -------------------------------------------------
+        if scSimData.r_scB_leaderB_RTN is not None:
+            assert scSimData.v_scB_leaderB_RTN is not None
+
+            logging.debug(f"""
+Post-processed RTN data:
+  r_scB_leaderB_RTN:   {scSimData.r_scB_leaderB_RTN.data.dtype}
+  v_scB_leaderB_RTN:   {scSimData.v_scB_leaderB_RTN.data.dtype}
+""")
+
+        # -------------------------------------------------
+        # Optional FSW-owned debug data
+        # -------------------------------------------------
+        if scSimData.sigma_BN is not None:
+            assert scSimData.omega_BN_B is not None
+            assert scSimData.sigma_RN is not None
+            assert scSimData.omega_RN_N is not None
+            assert scSimData.sigma_BR is not None
+            assert scSimData.omega_BR_B is not None
+            assert scSimData.cmdTorqueBody is not None
+            assert scSimData.cmdMotorTorque is not None
+
+            logging.debug(f"""
+FSW-owned debug data:
+  sigma_BN:            {scSimData.sigma_BN.data.dtype}
+  omega_BN_B:          {scSimData.omega_BN_B.data.dtype}
+  sigma_RN:            {scSimData.sigma_RN.data.dtype}
+  omega_RN_N:          {scSimData.omega_RN_N.data.dtype}
+  sigma_BR:            {scSimData.sigma_BR.data.dtype}
+  omega_BR_B:          {scSimData.omega_BR_B.data.dtype}
+  cmdTorqueBody:       {scSimData.cmdTorqueBody.data.dtype}
+  cmdMotorTorque:      {scSimData.cmdMotorTorque.data.dtype}
+""")
+
+        # -------------------------------------------------
+        # Optional dynamics-owned debug data
+        # -------------------------------------------------
+        if scSimData.thrustForce_B is not None:
+            assert scSimData.thrustTorquePntB_B is not None
+            assert scSimData.thrustBlowDownFactor is not None
+            assert scSimData.ispBlowDownFactor is not None
+            assert scSimData.rwOmega is not None
+            assert scSimData.rwUCurrent is not None
+            assert scSimData.rwNetPower is not None
+            assert scSimData.obcNetPower is not None
+            assert scSimData.solarPanelNetPower is not None
+
+            logging.debug(f"""
+Dynamics-owned debug data:
+  thrustForce_B:        {scSimData.thrustForce_B.data.dtype}
+  thrustTorquePntB_B:   {scSimData.thrustTorquePntB_B.data.dtype}
+  thrustBlowDownFactor: {scSimData.thrustBlowDownFactor.data.dtype}
+  ispBlowDownFactor:    {scSimData.ispBlowDownFactor.data.dtype}
+  rwOmega:              {scSimData.rwOmega.data.dtype}
+  rwUCurrent:           {scSimData.rwUCurrent.data.dtype}
+  rwNetPower:           {scSimData.rwNetPower.data.dtype}
+  obcNetPower:          {scSimData.obcNetPower.data.dtype}
+  solarPanelNetPower:   {scSimData.solarPanelNetPower.data.dtype}
 """)
