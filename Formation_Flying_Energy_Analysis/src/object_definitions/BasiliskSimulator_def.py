@@ -38,6 +38,8 @@ from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 
+import plotting.debug_plotting as plt
+
 
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
 
@@ -246,85 +248,27 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         """
         Read the data from all recorders and output a single data file
         """
-        logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")
-        
-    
-
-        #################### DEBUG ####################
-        # """
-        # Quick debugging plot of follower position/velocity relative to leader.
-        # """
-        # import matplotlib.pyplot as plt
-        # import numpy as np
-        # from Basilisk.utilities import macros
-
-        # sat_idx = 1  # Change this manually for debugging
-
-        # leader_bundle = self.scRuntimeBundles[0]
-        # follower_bundle = self.scRuntimeBundles[sat_idx]
-
-        # assert leader_bundle is not None
-        # assert follower_bundle is not None
-        # assert leader_bundle.fsw.navTransRecorder is not None
-        # assert follower_bundle.fsw.navTransRecorder is not None
-
-        # leader_rec = leader_bundle.fsw.navTransRecorder
-        # follower_rec = follower_bundle.fsw.navTransRecorder
-
-        # t_min = np.array(leader_rec.times()) * macros.NANO2MIN
-
-        # r_leader_N = np.array(leader_rec.r_BN_N)
-        # v_leader_N = np.array(leader_rec.v_BN_N)
-
-        # r_follower_N = np.array(follower_rec.r_BN_N)
-        # v_follower_N = np.array(follower_rec.v_BN_N)
-
-        # rel_r_N = r_follower_N - r_leader_N
-        # rel_v_N = v_follower_N - v_leader_N
-
-        # rel_r_norm = np.linalg.norm(rel_r_N, axis=1)
-        # rel_v_norm = np.linalg.norm(rel_v_N, axis=1)
-
-        # plt.figure()
-        # plt.plot(t_min, rel_r_N[:, 0], label="x")
-        # plt.plot(t_min, rel_r_N[:, 1], label="y")
-        # plt.plot(t_min, rel_r_N[:, 2], label="z")
-        # plt.plot(t_min, rel_r_norm, label="norm")
-        # plt.xlabel("Time [min]")
-        # plt.ylabel("Relative position [m]")
-        # plt.title(f"Spacecraft {sat_idx} position relative to leader")
-        # plt.legend()
-        # plt.grid(True)
-
-        # plt.figure()
-        # plt.plot(t_min, rel_v_N[:, 0], label="vx")
-        # plt.plot(t_min, rel_v_N[:, 1], label="vy")
-        # plt.plot(t_min, rel_v_N[:, 2], label="vz")
-        # plt.plot(t_min, rel_v_norm, label="norm")
-        # plt.xlabel("Time [min]")
-        # plt.ylabel("Relative velocity [m/s]")
-        # plt.title(f"Spacecraft {sat_idx} velocity relative to leader")
-        # plt.legend()
-        # plt.grid(True)
-
-        # plt.show()
-
-
-        ###############################################
-
-        
+        logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")        
 
         # Extract mission data from recorders
-        # TODO
         missionSimData: MissionSimData # TODO
 
         # Extract data for each spacecraft
-        simData = SimData()
+        simData = SimData(self.cfg)
         scSimDataList = simData.pull_every_spacecraft_data(self.scRuntimeBundles)
 
         # Write data to files using a 'SimDataWriter' helper object
         dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
         dataWriter.write_data_to_files()
+        del dataWriter # free up buffer
+
+        # Only create plots after a sim run if in debug mode. Data size will be too large otherwise
+        if self.cfg.data_mode == "debug":
+            plt.plot_all_formation_plots(scSimDataList)
+
+        # Release data
+        del scSimDataList
+        
 
 
 
