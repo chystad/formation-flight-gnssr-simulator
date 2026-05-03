@@ -1,12 +1,19 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 1 # [hours] 
+  simulationDuration: 0.5 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 3
   sat_init_source: "oe" # [oe, vec]
   data_mode: "debug" # "optimized" for fewer recorders and long time horizons, "debug" for all recorders and short time horizons
+  shared_deployer_OEs: # Sat init state becomes: elem2rv(deployer_OEs) + deployment_vel
+    a: 6798.        # [km]  Semi-major axis
+    e: 0.004161     # [-]   Eccentricity
+    i: 97.3166      # [deg] Inclination
+    Omega: 6.7052   # [deg] RAAN
+    omega: 83.3535  # [deg] Argument of periapsis
+    f: 276.82       # [deg] Anomaly
 
 # Satellite parameters
 SATELLITES:
@@ -21,16 +28,7 @@ SATELLITES:
           0.,         0.,         0.03333333] # [kgm^2] Inertia of hub about point Bc in B frame components
     r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
     r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
-    init_OEs:
-      a: 6798.        # [km]  Semi-major axis
-      e: 0.004161     # [-]   Eccentricity
-      i: 97.3166      # [deg] Inclination
-      Omega: 6.7052   # [deg] RAAN
-      omega: 83.3535  # [deg] Argument of periapsis
-      f: 276.82       # [deg] Anomaly
-    init_state_vec:
-      [6800000, 0, 0, # [m]   [x, y, z    (ECI)
-      10000, 0, 0]    # [m/s] vx, vy, vz] (ECI)
+    deploy_vel: [0.0, 0.0, 0.0] # [m/s] Deployment velocity from shared deployer, expressed in N frame
     init_att: [[0.3], [0.2], [-0.2]]    # Orientation of Body relative to Inertial expressed using MRP
     init_angvel: [[0.1], [0.15], [0.]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
@@ -44,16 +42,7 @@ SATELLITES:
           0.,         0.,         0.03333333]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
-    init_OEs:
-      a: 6798.
-      e: 0.004161
-      i: 97.3166 
-      Omega: 6.7052
-      omega: 83.3535
-      f: 286.82
-    init_state_vec:
-      [6800000, 0, 0,
-      10000, 0, 0]
+    deploy_vel: [1.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.1], [0.], [0.]] 
   follower-2:
@@ -67,16 +56,7 @@ SATELLITES:
           0.,         0.,         0.1]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
-    init_OEs:
-      a: 6798.
-      e: 0.004161
-      i: 97.3166 
-      Omega: 6.7052
-      omega: 83.3535
-      f: 296.82
-    init_state_vec:
-      [6800000, 0, 0,
-      10000, 0, 0]
+    deploy_vel: [0.0, 1.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.1], [0.], [0.]] 
 

@@ -68,6 +68,7 @@ class Config:
         num_satellites =        int(    cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    cfg['SIMULATION']['sat_init_source'])
         data_mode =             str(    cfg['SIMULATION']['data_mode'])
+        shared_deployer_OEs =           cfg['SIMULATION']['shared_deployer_OEs']
         all_sat_params =                cfg['SATELLITES'] # dict[str, dict[str, Any]]
         all_gs_params =                 cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
 
@@ -200,7 +201,6 @@ class Config:
         self.run_idx: int = run_idx
         
         # Simulation
-        self.output_data_save_dir: Path = self._build_output_data_save_dir(mc_cfg, run_idx)
         self.timestamp_str: str = mc_cfg.timestamp_str
         self.startTime: str = startTime_str
         self.simulationDuration: float = simulationDuration
@@ -209,6 +209,8 @@ class Config:
         self.num_satellites: int = num_satellites
         self.sat_init_source: str = sat_init_source
         self.data_mode: str = data_mode
+        self.output_data_save_dir: Path = self._build_output_data_save_dir(mc_cfg, run_idx)
+        self.shared_deployer_OEs: orbitalMotion.ClassicElements = self._generate_deployer_oe_instance_from_config(shared_deployer_OEs)
 
         # Satellites
         self.satellites: list[Satellite] = satellites
@@ -466,6 +468,7 @@ class Config:
         # Define the output data save folder name for single runs outside of Monte Carlo
         mc_dir_name = mc_cfg.mc_dir_name
         mc_run_dir_name = f"run_{run_idx:03d}" # TODO: Assign to attribute
+        single_run_dir_name = f"{mc_cfg.timestamp_str}"
 
         # Ensure output data root folder exists
         OUTPUT_DATA_ROOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -474,12 +477,34 @@ class Config:
         if mc_cfg.mc_enabled:
             output_data_save_dir = OUTPUT_DATA_ROOT_DIR / BATCH_OUTPUT_DATA_DIR_NAME / mc_dir_name / mc_run_dir_name
         else:
-            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / SINGLE_OUTPUT_DATA_DIR_NAME
+            output_data_save_dir = OUTPUT_DATA_ROOT_DIR / SINGLE_OUTPUT_DATA_DIR_NAME / single_run_dir_name
 
         # Ensure full output data folder exists
         output_data_save_dir.mkdir(parents=True, exist_ok=True)
 
         return output_data_save_dir
+    
+    def _generate_deployer_oe_instance_from_config(self, deployer_OEs: dict) -> orbitalMotion.ClassicElements:
+        
+        required_elements = ["a", "e", "i", "Omega", "omega", "f"]
+        oe = orbitalMotion.ClassicElements()
+
+        if isinstance(deployer_OEs, dict):
+            for key in required_elements:
+                if not key in deployer_OEs:
+                    raise ValueError(f"Orbital element '{key}' for deployer is not defined")
+                
+                elif not isinstance(deployer_OEs[key], float):
+                    raise ValueError(f"Orbital element '{key}' for deployer is defined, but contains a type {type(deployer_OEs[key])} value")
+                
+            oe.a = deployer_OEs["a"] * 1000                 # [m]
+            oe.e = deployer_OEs["e"]                        # [-]
+            oe.i = deployer_OEs["i"] * macros.D2R           # [Rad]
+            oe.Omega = deployer_OEs["omega"] * macros.D2R   # [Rad]
+            oe.omega = deployer_OEs["omega"] * macros.D2R   # [Rad]
+            oe.f = deployer_OEs["f"] * macros.D2R           # [Rad]
+
+            return oe
 
 
     def generate_satellite_instances_from_config(self, 
@@ -521,56 +546,22 @@ class Config:
             else:
                 raise ValueError("Satellite parameter keys are not strings")
             
-            # Initialize some variables
-            init_OEs = sat_param['init_OEs']
-            init_state_vec = sat_param['init_state_vec']
-            sat_init_OEs: Optional[orbitalMotion.ClassicElements] = None
-            sat_init_pos: Optional[NDArray[np.float64]] = None
-            sat_init_vel: Optional[NDArray[np.float64]] = None
 
-            # If sat_init_source == "oe", check if orbital elements are provided by the config and extract to sat_init_OEs
-            required_elements = ["a", "e", "i", "Omega", "omega", "f"]
-            oe = orbitalMotion.ClassicElements()
-            if sat_init_source == "oe":
-                if isinstance(init_OEs, dict):
-                    for key in required_elements:
-                        if not key in init_OEs:
-                            raise ValueError(f"Orbital element '{key}' for satellite '{sat_name}' is not defined")
-                        
-                        elif not isinstance(init_OEs[key], float): # TODO: if downstream functions work with int, expand accepted types here. 
-                            raise ValueError(f"Orbital element '{key}' for satellite '{sat_name}' is defined, but contains a type {type(init_OEs[key])} value")
-                        
-                    oe.a = init_OEs["a"] * 1000                 # [m]
-                    oe.e = init_OEs["e"]                        # [-]
-                    oe.i = init_OEs["i"] * macros.D2R           # [Rad]
-                    oe.Omega = init_OEs["omega"] * macros.D2R   # [Rad]
-                    oe.omega = init_OEs["omega"] * macros.D2R   # [Rad]
-                    oe.f = init_OEs["f"] * macros.D2R           # [Rad]
-                    
-                    sat_init_OEs = oe
-                else:
-                    raise ValueError(f"'init_OEs' parameter for satellite '{sat_name}' is not of type dict")
-                
-            # If sat_init_source == "vec", check if state vector is provided by the config and extract to sat_init_state_vec
-            elif sat_init_source == "vec":
-                if isinstance(init_state_vec, list):
-                    if len(init_state_vec) != 6:
-                        raise ValueError(f"Initial state vector for satellite '{sat_name}' contains {len(init_state_vec)} elements (expected 6)")
-                    
-                    for i, elem in enumerate(init_state_vec):
-                        if not (isinstance(elem, int) or isinstance(elem, float)):
-                            raise ValueError(f"'init_state_vec' for satellite {sat_name} does not contain elements of the correct type. "
-                                             f"Element nr. {i} was of type {type(elem)} (expected int or float)")
-
-                    np_state_arr = np.array(init_state_vec, dtype=np.float64)
-                    sat_init_pos = np_state_arr[:3] # ECI Position
-                    sat_init_vel = np_state_arr[3:] # ECI Velocity
-
-                else: 
-                    raise ValueError(f"'init_state_vec' parameter for satellite '{sat_name}' is not of type list")
-
+            # Check deply_vel
+            deploy_vel = sat_param['deploy_vel']
+            if isinstance(deploy_vel, list):
+                if len(deploy_vel) != 3:
+                    raise ValueError(f"Deployment velocity vector for satellite '{sat_name}' contains {len(deploy_vel)} elements (expected 3)")
+                for i, elem in enumerate(deploy_vel):
+                    if not isinstance(elem, float):
+                        try:
+                            elem = float(elem)
+                            deploy_vel[i] = elem
+                        except:
+                            raise ValueError(f"'deploy_vel' element #{i} is of type {type(elem)}, (expected float)")
             else:
-                raise ValueError(f"Unrecognized satellite initial condition source '{sat_init_source}'")
+                raise ValueError(f"'deploy_vel' parameter for satellite '{sat_name}' is of type {type(deploy_vel)} (expected list)")
+            deploy_vel = np.asarray(deploy_vel, dtype=np.float64)
 
             
             # Check that I_B from config is correct, and transform it into the type expected by Basilisk
@@ -667,9 +658,7 @@ class Config:
                 I_B = I_B,
                 r_BP_B = r_BP_B,
                 r_BA_B = r_BA_B,
-                init_OEs = sat_init_OEs,
-                init_pos = sat_init_pos,
-                init_vel = sat_init_vel,
+                deployment_vel = deploy_vel,
                 init_att = init_att,
                 init_angvel = init_angvel
             )
@@ -870,7 +859,8 @@ class Config:
 
 
     def validate_sim_parameters(self,
-                                data_mode: str) -> None:
+                                data_mode: str,
+                                ) -> None:
         """
         
         """
