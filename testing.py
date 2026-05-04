@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Optional
 from Basilisk.utilities import RigidBodyKinematics as rbk
 from Basilisk.utilities import macros
 
@@ -131,10 +132,13 @@ def mrp_sanity_check(sigma) -> None:
 # mrp_D = rbk.C2MRP(C_ND_N)
 
 
-a: dict[str, int] = {}
-a[f"test{0}"] = 100
-a[f"test{1}"] = 200
 
-for key, value in a.items():
-    print(key)
-    print(value)
+dynRate = 0.5
+powSampRate = 0.1
+
+print(powSampRate % dynRate)
+
+if powSampRate % dynRate != 0.0:
+    print(f"dynRate: {dynRate} not direct multiple of powSampleRate: {powSampRate}")
+else:
+    print(f"dynRate is a direct multiple of powSampRate")

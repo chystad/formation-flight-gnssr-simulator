@@ -1,10 +1,10 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 12 # [hours] 
+  simulationDuration: 6 # [hours] 
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 3
+  num_satellites: 2
   sat_init_source: "oe" # [oe, vec]
   data_mode: "debug" # "optimized" for fewer recorders and long time horizons, "debug" for all recorders and short time horizons
   shared_deployer_OEs: # Sat init state becomes: elem2rv(deployer_OEs) + deployment_vel
@@ -18,33 +18,33 @@ SIMULATION:
 # Satellite parameters
 SATELLITES:
   leader:
-    m_s: 8.0      # [kg]  Satellite mass
+    m_s: 12.0      # [kg]  Satellite mass
     C_D: 2.2      # [-]   Drag coefficient
     A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
     C_R: 1.21     # [-]   Radiation pressure coefficient
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
-    I_B: [0.06666667, 0.,         0.,        
-          0.,         0.08666667, 0.,
-          0.,         0.,         0.03333333] # [kgm^2] Inertia of hub about point Bc in B frame components
+    I_B: [0.5, 0.,         0.,        
+          0.,         0.5, 0.,
+          0.,         0.,         0.5] # [kgm^2] Inertia of hub about point Bc in B frame components
     r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
     r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
     deploy_vel: [0.0, 0.0, 0.0] # [m/s] Deployment velocity from shared deployer, expressed in N frame
     init_att: [[0.3], [0.2], [-0.2]]    # Orientation of Body relative to Inertial expressed using MRP
-    init_angvel: [[0.1], [0.15], [0.]] # Angular velocity of Body relative to Inertial expressed in Body
+    init_angvel: [[0.0], [0.0], [0.0]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
-    m_s: 8.0
+    m_s: 12.0
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.06666667, 0.,         0.,        
-          0.,         0.08666667, 0.,
-          0.,         0.,         0.03333333]
+    I_B: [0.5, 0.,         0.,        
+          0.,         0.5, 0.,
+          0.,         0.,         0.5]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
     deploy_vel: [1.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
-    init_angvel: [[0.1], [0.], [0.]] 
+    init_angvel: [[0.0], [0.], [0.]] 
   follower-2:
     m_s: 8.0
     C_D: 2.2
@@ -59,11 +59,25 @@ SATELLITES:
     deploy_vel: [0.0, 1.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.1], [0.], [0.]] 
+  follower-3:
+    m_s: 8.0
+    C_D: 2.2
+    A_D: 0.06
+    C_R: 1.21 
+    A_srp: 0.06
+    I_B: [0.06666667, 0.,         0.,        
+          0.,         0.08666667, 0.,
+          0.,         0.,         0.03333333]
+    r_BP_B: [0, 0, 1]
+    r_BA_B: [0, 1, 0]
+    deploy_vel: [1.0, 0.0, 0.0]
+    init_att: [[0.], [0.], [0.]]
+    init_angvel: [[0.1], [0.], [0.]] 
 
 # TODO
 FORMATION_CONTROL:
   form_enabled: true
-  form_type: "constant_along_track"  # TODO "constant_along_track" or "circular_projected_orbit"
+  form_type: "cat"  # ['cat': constant along track, 'cpo': circular projected orbit, 'cc': concentric]
   leader_mode: "leader_sat" # TODO Might remove to just be decided by 'form_type' "leader_sat" or "common_point"
   form_pos_tolerance: 25.0 # [m] TODO
   form_vel_tolerance: 0.02 # [m/s] TODO

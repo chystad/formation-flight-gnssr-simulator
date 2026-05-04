@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import logging
+import itertools
 from enum import Enum
 from typing import Optional, Any, TypeAlias
 
@@ -32,7 +33,7 @@ from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, 
                                 svIntegrators, reactionWheelStateEffector, simpleMassProps,
                                 RWConfigPayload, groundLocation, thrusterDynamicEffector)
 from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower, fuelTank)
-from Basilisk.utilities import (orbitalMotion, 
+from Basilisk.utilities import (orbitalMotion, fswSetupThrusters, 
                                 unitTestSupport, simIncludeRW, simIncludeThruster)
 
 BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent clearer
@@ -40,7 +41,6 @@ BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent
 from object_definitions.Config_def import Config
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
-# from object_definitions.FormationControlStack_def import FormationControlStack
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
@@ -140,12 +140,13 @@ class BasiliskDynamicsModel:
 
         # Persistent message handles exposed to FSW
         self.sc_state_out_msg: Optional[messaging.SCStatesMsg] = None
+        self.mass_vehicle_config_out_msg: Optional[messaging.VehicleConfigMsg] = None
         self.rw_speed_out_msg: Optional[messaging.RWSpeedMsg] = None
         self.rw_config_msg: Optional[messaging.RWArrayConfigMsg] = None
         self.bat_state_msg: Optional[messaging.PowerStorageStatusMsg] = None
         self.gs_access_msgs: list[messaging.AccessMsg] = []
         self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
-        self.vehicle_config_out_msg: Optional[messaging.VehicleConfigMsg] = None
+        self.thr_config_array_msg: Optional[messaging.THRArrayConfigMsg] = None
 
         # Recorders owned by this class
         self.batteryStateRecorder: BasiliskRecorder    # Battery charge
@@ -215,17 +216,21 @@ class BasiliskDynamicsModel:
     def connect_fsw_torque_cmd_to_rw_effector(self, fsw: FswStack) -> None:
         """
         Connect the computed FSW RW torque to the RW effector
-        TODO: Connect the computed thrust to the thruster effector
         """
         # Subscribe RWs to motor torque commands from the FSW 
         assert self.rwEffector is not None
-        self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
+        self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rw_map.rwMotorTorqueOutMsg)
+
+
 
 
     def connect_fsw_thr_cmd_to_thr_effector(self, fsw: FswStack) -> None:
+        """
+        Connect the computed FSW thruster force to the thruster state effector
+        """
 
         assert self.thrusterEffector is not None
-        self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
+        self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.form_ctrl.onTimeOutMsg)
 
         logging.debug(f"[DYN{self.sat_idx}] thruster subscribed to FSW thr cmd")
 
@@ -271,7 +276,7 @@ class BasiliskDynamicsModel:
         
         # Assign msg attribute
         self.sc_state_out_msg = self.scObj.scStateOutMsg
-        self.vehicle_config_out_msg = self.simpleMassPropsObj.vehicleConfigOutMsg
+        self.mass_vehicle_config_out_msg = self.simpleMassPropsObj.vehicleConfigOutMsg
         
         logging.debug(f"[{self.logTag}] Spacecraft hub initialized with initial conditions")
 
@@ -512,7 +517,9 @@ class BasiliskDynamicsModel:
         # Create RW effector and attach to the spacecraft 
         rwEffector = reactionWheelStateEffector.ReactionWheelStateEffector()
         rwEffector.ModelTag = f"{self.scObj.ModelTag}_rwEff"
-        rwFactory.addToSpacecraft(self.scObj.ModelTag, rwEffector, self.scObj)        
+        rwFactory.addToSpacecraft(self.scObj.ModelTag, rwEffector, self.scObj)    
+
+
 
         # Set attributes
         self.rwFactory = rwFactory
@@ -570,9 +577,17 @@ class BasiliskDynamicsModel:
             self.scObj
         )
 
+        # Setup thr_config_array_msg
+        fswSetupThrusters.clearSetup()
+        for key, th in thrusterFactory.thrusterList.items():
+            loc_B_tmp = list(itertools.chain.from_iterable(th.thrLoc_B))
+            dir_B_tmp = list(itertools.chain.from_iterable(th.thrDir_B))
+            fswSetupThrusters.create(loc_B_tmp, dir_B_tmp, th.MaxThrust)
+        
         # Assign attributes
         self.thrusterFactory = thrusterFactory
         self.thrusterEffector = thrusterEffector
+        self.thr_config_array_msg = fswSetupThrusters.writeConfigMessage()
 
         logging.debug(f"[{self.logTag}] Thruster effector initialized for '{self.scObj.ModelTag}'")
 
@@ -591,7 +606,7 @@ class BasiliskDynamicsModel:
         fuelTankEffector.ModelTag = f"{self.scObj.ModelTag}_fuelEff"
         
         fuelTankEffector.setTankModel(fuelTankModel)
-        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.5 # [kg] fraction of the total satellite mass
+        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.1 # [kg] fraction of the total satellite mass
         fuelTankModel.propMassInit = fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
         fuelTankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
         fuelTankEffector.r_TB_B = [[0.0], [0.0], [0.0]]

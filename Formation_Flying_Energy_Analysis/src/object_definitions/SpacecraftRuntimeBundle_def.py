@@ -29,4 +29,3 @@ class SpacecraftRuntimeBundle:
     # Per-satellite model objects (environment models are omitted bc. they are same for all)
     dynModel: BasiliskDynamicsModel
     fsw: FswStack
-    formCtrl: Optional[FormationControlStack]

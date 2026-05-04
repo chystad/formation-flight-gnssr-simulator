@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 import os
 import csv
 import logging
+import itertools
 import numpy as np
 from numpy.typing import NDArray
 from enum import Enum
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional, TypeAlias
 
 from Basilisk.architecture import messaging, sysModel
-from Basilisk.utilities import macros
+from Basilisk.utilities import macros, fswSetupThrusters
 from Basilisk.utilities import RigidBodyKinematics as rbk
 from Basilisk.fswAlgorithms import mrpFeedback, attTrackingError, inertial3D, rwMotorTorque, spacecraftReconfig
 from Basilisk.simulation import simpleNav
@@ -117,6 +118,7 @@ class FswStack():
         sat_idx: int,
         scModelTag: str,
         sc_state_out_msg: messaging.SCStatesMsg,
+        mass_vehicle_config_out_msg: messaging.VehicleConfigMsg,
         rw_speed_out_msg: messaging.RWSpeedMsg,
         rw_config_msg: messaging.RWArrayConfigMsg,
         bat_state_msg: messaging.PowerStorageStatusMsg,
@@ -124,12 +126,15 @@ class FswStack():
         gs_state_msgs: list[messaging.GroundStateMsg],
         sun_eclipse_msg: messaging.EclipseMsg,
         sun_state_msg: messaging.SpicePlanetStateMsg,
+        thr_config_array_msg: messaging.THRArrayConfigMsg,
         log_timestamp: str,
     ):
         self.scheduler = _FswStackScheduler(self, sat_idx)
         self.sim = sim
         self.sat = sat
         self.sat_idx = sat_idx
+        # self.dynModel = dynModel
+        self.massVehicleConfigOutMsg = mass_vehicle_config_out_msg
         self.scModelTag = scModelTag
         self.formEnabled = sim.cfg.form_enabled
         self.batStateMsg = bat_state_msg
@@ -138,6 +143,7 @@ class FswStack():
         self.selectedGsIdx: Optional[int] = None
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
+        self.thrConfigArrayMsg = thr_config_array_msg
         self.logTimestamp = log_timestamp
         self.lastCommsNanos = 0
         self.ModelTag = f"RwFswStack{sat_idx}"
@@ -151,6 +157,10 @@ class FswStack():
         self.fswTaskName = f"FswTask_{sat_idx}"
         sim.fswProcesses[sat_idx].addTask(sim.CreateNewTask(self.fswTaskName, sim.fswRateNanos)) # type: ignore
 
+        # Message definition
+        self.attRefMsg = None
+        self.attGuidMsg = None
+        
         # Read burn attitude and thrust request from FormationControlStack
         self.formAttRefInMsg: Optional[messaging.AttRefMsg] = None
         self.formThrCmdInMsg: Optional[messaging.THRArrayOnTimeCmdMsg] = None
@@ -190,8 +200,8 @@ class FswStack():
         self.rw_map = rwMotorTorque.rwMotorTorque()
         self.rw_map.ModelTag = f"rwMotorTorque_{sat_idx}"
 
-        # self.form_ctrl = spacecraftReconfig.spacecraftReconfig()
-        # self.form_ctrl.ModelTag = f"formationControl_{sat_idx}"
+        self.form_ctrl = spacecraftReconfig.spacecraftReconfig()
+        self.form_ctrl.ModelTag = f"formationControl_{sat_idx}"
 
         # RW mapping configuration (controllable axes)
         self.rw_map.controlAxes_B = [
@@ -200,8 +210,7 @@ class FswStack():
             0, 0, 1,
         ]
 
-        # Exposed output for wiring fsw to the dynamics model
-        self.rwMotorTorqueOutMsg = self.rw_map.rwMotorTorqueOutMsg
+
 
         # Vehicle config msg
         vehicle_config_out = messaging.VehicleConfigMsgPayload(ISCPntB_B=sat.I_B)
@@ -214,24 +223,25 @@ class FswStack():
         if self.ctrl.Ki > 0:
             self.ctrl.integralLimit = 2.0 / self.ctrl.Ki * 0.1
 
+        # Setup models with correct parameters
+        self._setup_gateway_msgs()
+        self._setup_formation_control()
+        self._setup_desired_OE_difference()
+        self._setup_fsw_recorders()
+
         # Message wiring
         self.nav.scStateInMsg.subscribeTo(sc_state_out_msg)
         self.att_err.attNavInMsg.subscribeTo(self.nav.attOutMsg)
-        self.att_err.attRefInMsg.subscribeTo(self.guid.attRefOutMsg)
-        self.ctrl.guidInMsg.subscribeTo(self.att_err.attGuidOutMsg)
+        self.att_err.attRefInMsg.subscribeTo(self.attRefMsg) # OLD: self.guid.attRefOutMsg
+        self.ctrl.guidInMsg.subscribeTo(self.attGuidMsg) # OLD: self.att_err.attGuidOutMsg
         self.ctrl.vehConfigInMsg.subscribeTo(self._vc_msg)
         self.ctrl.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.ctrl.rwSpeedsInMsg.subscribeTo(rw_speed_out_msg)
         self.rw_map.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.rw_map.vehControlInMsg.subscribeTo(self.ctrl.cmdTorqueOutMsg)
 
-        # Initialize the fsw formation control module and recorders
-        # self._setup_formation_control()
-        self._setup_fsw_recorders()
-
         # Add scheduler and recorders to task (Low priority => Executes last)
         sim.AddModelToTask(self.fswTaskName, self.scheduler, 20)
-        # sim.AddModelToTask(self.fswTaskName, self.form_ctrl, 15)
         sim.AddModelToTask(self.fswTaskName, self.navTransRecorder, 10)
         if sim.cfg.data_mode == "debug":
             sim.AddModelToTask(self.fswTaskName, self.navAttRecorder, 10)
@@ -247,16 +257,14 @@ class FswStack():
     # Public helper functions #
     ###########################
     
-    def connect_form_ctrl_cmds_to_fsw(self, formCtrl: Optional[FormationControlStack]) -> None:
-        """
-        Subscribe to the attitude reference and thrust command output 
-        messages from FormationControlStack
-        """
-        if formCtrl is None: 
-            return
-        
-        self.formAttRefInMsg = formCtrl.form_att_ref_out_msg
-        self.formThrCmdInMsg = formCtrl.form_thr_cmd_out_msg
+    def connect_chief_trans_to_form_ctrl(self, fswChief: FswStack) -> None:
+            """
+            Connect the chief translational states to the spacecraftReconfig model
+
+            Args:
+                fswChief (FswStack): The chief's FSW stack
+            """
+            self.form_ctrl.chiefTransInMsg.subscribeTo(fswChief.nav.transOutMsg)
 
 
 
@@ -265,7 +273,7 @@ class FswStack():
     ##############################
 
     def _modules(self):
-        return [self.nav, self.guid, self.att_err, self.ctrl, self.rw_map]
+        return [self.nav, self.guid, self.form_ctrl, self.att_err, self.ctrl, self.rw_map]
 
 
     def _update_state(self, CurrentSimNanos: int) -> None:
@@ -276,6 +284,7 @@ class FswStack():
         self._eval_pointing_mode(CurrentSimNanos)
         self._guidance(CurrentSimNanos)
         self.guid.UpdateState(CurrentSimNanos)
+        self.form_ctrl.UpdateState(CurrentSimNanos)
         self.att_err.UpdateState(CurrentSimNanos)
         self.ctrl.UpdateState(CurrentSimNanos)
         self.rw_map.UpdateState(CurrentSimNanos)
@@ -559,16 +568,15 @@ class FswStack():
 
 
         # ---- Decide if spacecraft burn is requested, and if so, is the requested attitude reached (set burnRequested, burnAttitudeReached) ---- #
-        
-        if self.formEnabled and self.sat_idx != 0:
-            burnRequested = self._formation_burn_requested()
-            # logging.debug(f"[{self.logTag}] burnRequested: {burnRequested}")
-            self.it += 1
-            # if burnRequested:
-            #     burnAttitudeReached = self._burn_attitude_reached()
-        else:
-            burnRequested = False
-            burnAttitudeReached = False
+        # if self.formEnabled and self.sat_idx != 0:
+        #     burnRequested = self._formation_burn_requested()
+        #     # logging.debug(f"[{self.logTag}] burnRequested: {burnRequested}")
+        #     self.it += 1
+        #     # if burnRequested:
+        #     #     burnAttitudeReached = self._burn_attitude_reached()
+        # else:
+        #     burnRequested = False
+        #     burnAttitudeReached = False
 
 
         # ---- Set helper logical parameters for readability and easier easier debugging ---- # 
@@ -685,7 +693,7 @@ class FswStack():
         self.guid.sigma_R0N = [0.0, 0.0, 1.0]
 
         # Default: no thrust command given unless given by BURN mode.
-        self._publish_zero_thruster_cmd(CurrentSimNanos)
+        # self._publish_zero_thruster_cmd(CurrentSimNanos)
 
         match self.pointingMode:
             case PointingMode.COAST:
@@ -700,20 +708,20 @@ class FswStack():
             case PointingMode.CAPTURE:
                 self.guid.sigma_R0N = self._capture_desired_att()
 
-            case PointingMode.BURN_TRANSIT:
-                att_ref = self._read_form_att_ref()
-                if att_ref is not None:
-                    self.guid.sigma_R0N = list(att_ref.sigma_RN)
-                else:
-                    self.guid.sigma_R0N = [0.0, 0.0, 0.0]
+            # case PointingMode.BURN_TRANSIT:
+            #     att_ref = self._read_form_att_ref()
+            #     if att_ref is not None:
+            #         self.guid.sigma_R0N = list(att_ref.sigma_RN)
+            #     else:
+            #         self.guid.sigma_R0N = [0.0, 0.0, 0.0]
 
-            case PointingMode.BURN:
-                att_ref = self._read_form_att_ref()
-                if att_ref is not None:
-                    self.guid.sigma_R0N = list(att_ref.sigma_RN)
-                else:
-                    self.guid.sigma_R0N = [0.0, 0.0, 0.0]
-                self._publish_requested_thruster_cmd(CurrentSimNanos)
+            # case PointingMode.BURN:
+            #     att_ref = self._read_form_att_ref()
+            #     if att_ref is not None:
+            #         self.guid.sigma_R0N = list(att_ref.sigma_RN)
+            #     else:
+            #         self.guid.sigma_R0N = [0.0, 0.0, 0.0]
+            #     self._publish_requested_thruster_cmd(CurrentSimNanos)
             
             case PointingMode.EMERGENCY:
                 self.guid.sigma_R0N = self._emergency_desired_att()
@@ -723,51 +731,175 @@ class FswStack():
                 raise ValueError("")
             
 
-    def _read_form_thr_cmd(self):
-        if self.formThrCmdInMsg is None:
-            return None
-        return self.formThrCmdInMsg.read()
+    ################################
+    # Private setup helper methods #
+    ################################
 
 
-    def _read_form_att_ref(self):
-        if self.formAttRefInMsg is None:
-            return None
-        return self.formAttRefInMsg.read()
-
-    
-    def _read_form_att_ref_sigma(self) -> list[float]:
+    def _setup_formation_control(self) -> None:
         """
-        Only used for logging
-        """
-        if not self.formEnabled or self.formAttRefInMsg is None:
-            return [0.0, 0.0, 0.0]
-
-        try:
-            return list(self.formAttRefInMsg.read().sigma_RN)
-        except Exception:
-            return [0.0, 0.0, 0.0]
-    
-    
-    def _formation_burn_requested(self) -> bool:
-        """
-        True if FormationControlStack requests a nonzero burn for this spacecraft.
-        False if formation control is disabled, thrust cmd isn't initialized, 
-        """
-        if not self.formEnabled or self.formThrCmdInMsg is None:
-            return False
         
-        # logging.debug(f"[{self.logTag}] Attempting to read thruster command at iteration: {self.it}...")
+        """
+        assert self.sim.envModel.gravFactory is not None
+        self.form_ctrl.deputyTransInMsg.subscribeTo(self.nav.transOutMsg)
+        self.form_ctrl.attRefInMsg.subscribeTo(self.attRefMsg)
+        self.form_ctrl.thrustConfigInMsg.subscribeTo(self.thrConfigArrayMsg)
+        self.form_ctrl.vehicleConfigInMsg.subscribeTo(self.massVehicleConfigOutMsg)
+        self.form_ctrl.mu = self.sim.envModel.gravFactory.gravBodies["earth"].mu 
+        self.form_ctrl.attControlTime = 400  # [s]
 
-        try:
-            cmd = self._read_form_thr_cmd()
-            # logging.debug(f"[{self.logTag}] Printing read cmd: {cmd}")
-            if cmd is None:
-                return False
-            return any(float(t) > 0.0 for t in cmd.OnTimeRequest)
-        except:
-            logging.debug(f"[{self.logTag}] Formaton control is enabled, but method failed to read thrust command from Formation control")
-            return False
+        # connect a blank chief message
+        chiefData = messaging.NavTransMsgPayload()
+        chiefMsg = messaging.NavTransMsg().write(chiefData)
+        self.form_ctrl.chiefTransInMsg.subscribeTo(chiefMsg)
+
+
+    def _setup_desired_OE_difference(self) -> None:
+        """
+        Calculates and sets the desired classic orbital element difference dependinng on the selected formation type
+
+        The spacecraftReconfig module expects the desired classic orbital element difference to be on the following format:
+            [da, de, di, dOmega, domega, dM], 
+        Where 'da' is normalized to become  dimentionless 
+        """
         
+        if self.sim.cfg.form_type == "cat":
+            # Don't assign  desired OED for chief spacecraft
+            if self.sat_idx == 0:
+                return
+
+            desiredSeparation = self.sim.cfg.cat_const_separation
+
+            # TODO: Calculate the desired OED to get the desired separation given circular cheif orbit
+
+            self.form_ctrl.targetClassicOED = [
+                0.0, # da/a
+                0.0, # de
+                0.0, # di
+                0.0, # dOmega
+                0.0, # domega
+                -0.01*self.sat_idx] # dM
+
+        else: 
+            raise ValueError(f"Formation types other than 'constant along-track separation has not yet been implemented")
+        
+
+
+    def _setup_gateway_msgs(self):
+        """
+        Create C-wrapped gateway messages such that different modules can write to this message
+        and provide a common input msg for down-stream modules.
+        """
+        self.attRefMsg = messaging.AttRefMsg_C()
+        self.attGuidMsg = messaging.AttGuidMsg_C()
+
+        self._zero_gateway_msgs()
+
+        # Add both the guidance and formation control modules as writers of the attitude reference message 
+        messaging.AttRefMsg_C_addAuthor(self.form_ctrl.attRefOutMsg, self.attRefMsg)
+        messaging.AttRefMsg_C_addAuthor(self.guid.attRefOutMsg, self.attRefMsg)
+
+        # Add the attitude erro rmodule as writer of the attitude guidance message
+        messaging.AttGuidMsg_C_addAuthor(self.att_err.attGuidOutMsg, self.attGuidMsg)
+
+        # connect gateway FSW effector command msgs with the dynamics
+        # assert self.dynModel.rwEffector is not None
+        # assert self.dynModel.thrusterEffector is not None
+
+        # Connected in dynModel's public methods
+        # self.dynModel.rwEffector.rwMotorCmdInMsg.subscribeTo(self.rw_map.rwMotorTorqueOutMsg)
+        # self.dynModel.thrusterEffector.cmdsInMsg.subscribeTo(self.form_ctrl.onTimeOutMsg)
+
+
+    def _setup_fsw_recorders(self):
+        """
+        Initialize all fsw recorders
+
+        This method sets the attributes:
+            self.navTransRecorder:      Logs position and velocity
+            self.navAttRecorder:        Logs attitude and anfular rate
+            self.attRefRecorder:        Logs desired attitude and angular rate
+            self.attErrRecorder:        Logs attitude and angular rate error
+            self.cmdTorqueRecorder:     Logs commanded body torque
+            self.rwMotorTorqueRecorder: Logs actual RW torque
+        """
+
+        # Relevant Sample rates
+        lowSampleRateNanos = self.sim.lowSampleRateNanos
+        midSampleRateNanos = self.sim.midSampleRateNanos
+        highSampleRateNanos = self.sim.highSampleRateNanos
+
+        # Set recorder sample rates
+        navTransRate = lowSampleRateNanos # NOTE: This should always be 'lowSampleRateNanos' for 'lowRateTimes' to be correct in SimData._pull_single_spacecraft_data
+        navAttRate = highSampleRateNanos  # NOTE: This should always be 'highSampleRateNanos' for 'highRateTimes' to be correct in SimData._pull_single_spacecraft_data
+        attRefRate = highSampleRateNanos
+        attErrRate = highSampleRateNanos
+        cmdTorqueRate = highSampleRateNanos
+        rwMotorTorqueRate = highSampleRateNanos
+        
+        # Verify that rates are exact multiples of dynRate
+        if lowSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'lowSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'LOW_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+        if midSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'midSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'MID_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+        if highSampleRateNanos % self.sim.fswRateNanos != 0.0:
+            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
+                             "This would have caused inconsistent sampling intervals. "
+                             "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
+
+        # Mandetory translational state recorder
+        self.navTransRecorder = self.nav.transOutMsg.recorder(navTransRate) # r_BN_N [m] + v_BN_N [m/s]
+        self.navTransRecorder_RateNanos = navTransRate
+        
+        # Optional 'debug' recorders
+        if self.sim.cfg.data_mode == "debug":
+            # Attitude and angular rate recorder
+            self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
+            self.navAttRecorder_RateNanos =  navAttRate
+
+            # Desired orientational states and corresponding error
+            assert self.attRefMsg is not None
+            assert self.attGuidMsg is not None
+            self.attRefRecorder = self.attRefMsg.recorder(attRefRate) # sigma_RN [MRP] + omega_RN_N [rad/s]
+            self.attRefRecorder_RateNanos = attRefRate
+            self.attErrRecorder = self.attGuidMsg.recorder(attErrRate) # sigma_BR [MRP] + omega_BR_B [rad/s]
+            self.attErrRecorder_RateNanos = attErrRate
+
+            # RW commanded and outputted torque
+            self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(cmdTorqueRate) # torqueRequestBody [Nm]
+            self.cmdTorqueRecorder_RateNanos = cmdTorqueRate
+            self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(rwMotorTorqueRate) # motorTorque [Nm]
+            self.rwMotorTorqueRecorder_RateNanos = rwMotorTorqueRate
+
+        logging.debug(f"[{self.logTag}] FSW recorders initialized for '{self.scModelTag}'")
+
+        
+        
+
+    
+
+
+
+
+    ##########################
+    # Private helper methods #
+    ##########################    
+    
+    def _zero_gateway_msgs(self):
+        """Zero all FSW gateway message payloads"""
+        assert self.attRefMsg is not None
+        assert self.attGuidMsg is not None        
+        self.attRefMsg.write(messaging.AttRefMsgPayload())
+        self.attGuidMsg.write(messaging.AttGuidMsgPayload())
+
+        # Zero all actuator commands
+        self.rw_map.rwMotorTorqueOutMsg.write(messaging.ArrayMotorTorqueMsgPayload())
+        self.form_ctrl.onTimeOutMsg.write(messaging.THRArrayOnTimeCmdMsgPayload())
+    
 
     def _burn_attitude_reached(self) -> bool:
         """
@@ -787,38 +919,6 @@ class FswStack():
         except Exception:
             logging.debug(f"[{self.logTag}] Failed to determine if required burn attitude has been reached")
             return False
-        
-    
-    def _publish_zero_thruster_cmd(self, CurrentSimNanos: int) -> None:
-        payload = messaging.THRArrayOnTimeCmdMsgPayload()
-        payload.OnTimeRequest = [0.0]
-        self.thrOnTimeCmdOutMsg.write(payload, CurrentSimNanos)
-
-
-    def _publish_requested_thruster_cmd(self, CurrentSimNanos: int) -> None:
-        """
-        Forward the requested burn command from FormationControlStack to the dynamics thruster effector.
-        """
-        if not self.formEnabled or self.formThrCmdInMsg is None:
-            self._publish_zero_thruster_cmd(CurrentSimNanos)
-            return
-
-        req = self._read_form_thr_cmd()
-
-        payload = messaging.THRArrayOnTimeCmdMsgPayload()
-        if req is None:
-            payload.OnTimeRequest = [0.0]
-        else:
-            payload.OnTimeRequest = [float(req.OnTimeRequest[0])]
-
-        # print(
-        #     f"[{self.logTag}] publish thrust command: "
-        #     f"OnTimeRequest={payload.OnTimeRequest}, "
-        #     f"use_min_pulse_time={self.sim.cfg.use_min_pulse_time}, "
-        #     f"min_pulse_time={self.sim.cfg.min_pulse_time}"
-        # )
-            
-        self.thrOnTimeCmdOutMsg.write(payload, CurrentSimNanos)
         
     
     def _log_mode_switching_logic(
@@ -935,88 +1035,6 @@ class FswStack():
             ]
 
             writer.writerow(row)
-
-
-    # def _setup_formation_control(self) -> None:
-    #     """
-    #     Defines the station keeping module.
-    #     """
-    #     assert self.sim.envModel.gravFactory is not None
-
-    #     self.form_ctrl.deputyTransInMsg.subscribeTo(self.nav.transOutMsg)
-    #     self.form_ctrl.attRefInMsg.subscribeTo(self.attRefMsg)
-    #     self.form_ctrl.thrustConfigInMsg.subscribeTo(self.fswThrusterConfigMsg)
-    #     self.form_ctrl.vehicleConfigInMsg.subscribeTo(SimBase.DynModels[self.spacecraftIndex].simpleMassPropsObject.vehicleConfigOutMsg)
-    #     self.form_ctrl.mu = self.sim.envModel.gravFactory.gravBodies["earth"].mu  # [m^3/s^2]
-    #     self.form_ctrl.attControlTime = 400  # [s]
-    #     messaging.AttRefMsg_C_addAuthor(self.form_ctrl.attRefOutMsg, self.attRefMsg)
-
-    #     # connect a blank chief message
-    #     chiefData = messaging.NavTransMsgPayload()
-    #     chiefMsg = messaging.NavTransMsg().write(chiefData)
-    #     self.form_ctrl.chiefTransInMsg.subscribeTo(chiefMsg)
     
     
-    def _setup_fsw_recorders(self):
-        """
-        Initialize all fsw recorders
-
-        This method sets the attributes:
-            self.navTransRecorder:      Logs position and velocity
-            self.navAttRecorder:        Logs attitude and anfular rate
-            self.attRefRecorder:        Logs desired attitude and angular rate
-            self.attErrRecorder:        Logs attitude and angular rate error
-            self.cmdTorqueRecorder:     Logs commanded body torque
-            self.rwMotorTorqueRecorder: Logs actual RW torque
-        """
-
-        # Relevant Sample rates
-        lowSampleRateNanos = self.sim.lowSampleRateNanos
-        midSampleRateNanos = self.sim.midSampleRateNanos
-        highSampleRateNanos = self.sim.highSampleRateNanos
-
-        # Set recorder sample rates
-        navTransRate = lowSampleRateNanos # NOTE: This should always be 'lowSampleRateNanos' for 'lowRateTimes' to be correct in SimData._pull_single_spacecraft_data
-        navAttRate = highSampleRateNanos  # NOTE: This should always be 'highSampleRateNanos' for 'highRateTimes' to be correct in SimData._pull_single_spacecraft_data
-        attRefRate = highSampleRateNanos
-        attErrRate = highSampleRateNanos
-        cmdTorqueRate = highSampleRateNanos
-        rwMotorTorqueRate = highSampleRateNanos
-        
-        # Verify that rates are exact multiples of dynRate
-        if lowSampleRateNanos % self.sim.fswRateNanos != 0.0:
-            raise ValueError("'lowSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
-                             "This would have caused inconsistent sampling intervals. "
-                             "Change 'LOW_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
-        if midSampleRateNanos % self.sim.fswRateNanos != 0.0:
-            raise ValueError("'midSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
-                             "This would have caused inconsistent sampling intervals. "
-                             "Change 'MID_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
-        if highSampleRateNanos % self.sim.fswRateNanos != 0.0:
-            raise ValueError("'highSampleRateNanos' is not an exact multiple of 'fswRateNanos'. "
-                             "This would have caused inconsistent sampling intervals. "
-                             "Change 'HIGH_SAMPLE_RATE' and/or 'FSW_RATE' to fix this error")
-
-        # Mandetory translational state recorder
-        self.navTransRecorder = self.nav.transOutMsg.recorder(navTransRate) # r_BN_N [m] + v_BN_N [m/s]
-        self.navTransRecorder_RateNanos = navTransRate
-        
-        # Optional 'debug' recorders
-        if self.sim.cfg.data_mode == "debug":
-            # Attitude and angular rate recorder
-            self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
-            self.navAttRecorder_RateNanos =  navAttRate
-
-            # Desired orientational states and corresponding error
-            self.attRefRecorder = self.guid.attRefOutMsg.recorder(attRefRate) # sigma_RN [MRP] + omega_RN_N [rad/s]
-            self.attRefRecorder_RateNanos = attRefRate
-            self.attErrRecorder = self.att_err.attGuidOutMsg.recorder(attErrRate) # sigma_BR [MRP] + omega_BR_B [rad/s]
-            self.attErrRecorder_RateNanos = attErrRate
-
-            # RW commanded and outputted torque
-            self.cmdTorqueRecorder = self.ctrl.cmdTorqueOutMsg.recorder(cmdTorqueRate) # torqueRequestBody [Nm]
-            self.cmdTorqueRecorder_RateNanos = cmdTorqueRate
-            self.rwMotorTorqueRecorder = self.rw_map.rwMotorTorqueOutMsg.recorder(rwMotorTorqueRate) # motorTorque [Nm]
-            self.rwMotorTorqueRecorder_RateNanos = rwMotorTorqueRate
-
-        logging.debug(f"[{self.logTag}] FSW recorders initialized for '{self.scModelTag}'")
+    
