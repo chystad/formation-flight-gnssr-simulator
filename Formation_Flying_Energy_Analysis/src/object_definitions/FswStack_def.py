@@ -13,7 +13,7 @@ from typing import Any, Optional, TypeAlias
 from Basilisk.architecture import messaging, sysModel
 from Basilisk.utilities import macros
 from Basilisk.utilities import RigidBodyKinematics as rbk
-from Basilisk.fswAlgorithms import mrpFeedback, attTrackingError, inertial3D, rwMotorTorque
+from Basilisk.fswAlgorithms import mrpFeedback, attTrackingError, inertial3D, rwMotorTorque, spacecraftReconfig
 from Basilisk.simulation import simpleNav
 
 BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent clearer
@@ -144,6 +144,8 @@ class FswStack():
         self.logTag = f"FSW{sat_idx}"
         self.pointingMode = PointingMode.COAST
 
+        self.it = 0
+
         # Create FSW task as part of the FSW process
         assert sim.fswProcesses[sat_idx] is not None
         self.fswTaskName = f"FswTask_{sat_idx}"
@@ -188,6 +190,9 @@ class FswStack():
         self.rw_map = rwMotorTorque.rwMotorTorque()
         self.rw_map.ModelTag = f"rwMotorTorque_{sat_idx}"
 
+        # self.form_ctrl = spacecraftReconfig.spacecraftReconfig()
+        # self.form_ctrl.ModelTag = f"formationControl_{sat_idx}"
+
         # RW mapping configuration (controllable axes)
         self.rw_map.controlAxes_B = [
             1, 0, 0,
@@ -220,11 +225,13 @@ class FswStack():
         self.rw_map.rwParamsInMsg.subscribeTo(rw_config_msg)
         self.rw_map.vehControlInMsg.subscribeTo(self.ctrl.cmdTorqueOutMsg)
 
-        # Initialize the fsw recorders
+        # Initialize the fsw formation control module and recorders
+        # self._setup_formation_control()
         self._setup_fsw_recorders()
 
         # Add scheduler and recorders to task (Low priority => Executes last)
         sim.AddModelToTask(self.fswTaskName, self.scheduler, 20)
+        # sim.AddModelToTask(self.fswTaskName, self.form_ctrl, 15)
         sim.AddModelToTask(self.fswTaskName, self.navTransRecorder, 10)
         if sim.cfg.data_mode == "debug":
             sim.AddModelToTask(self.fswTaskName, self.navAttRecorder, 10)
@@ -240,12 +247,16 @@ class FswStack():
     # Public helper functions #
     ###########################
     
-    def connect_form_ctrl_cmds_to_fsw(self, formationControl: FormationControlStack) -> None:
+    def connect_form_ctrl_cmds_to_fsw(self, formCtrl: Optional[FormationControlStack]) -> None:
         """
+        Subscribe to the attitude reference and thrust command output 
+        messages from FormationControlStack
+        """
+        if formCtrl is None: 
+            return
         
-        """
-        self.formAttRefInMsg = formationControl.form_att_ref_out_msgs[self.sat_idx]
-        self.formThrCmdInMsg = formationControl.form_thr_cmd_out_msgs[self.sat_idx]
+        self.formAttRefInMsg = formCtrl.form_att_ref_out_msg
+        self.formThrCmdInMsg = formCtrl.form_thr_cmd_out_msg
 
 
 
@@ -548,10 +559,13 @@ class FswStack():
 
 
         # ---- Decide if spacecraft burn is requested, and if so, is the requested attitude reached (set burnRequested, burnAttitudeReached) ---- #
-        if self.formEnabled:
+        
+        if self.formEnabled and self.sat_idx != 0:
             burnRequested = self._formation_burn_requested()
-            if burnRequested:
-                burnAttitudeReached = self._burn_attitude_reached()
+            # logging.debug(f"[{self.logTag}] burnRequested: {burnRequested}")
+            self.it += 1
+            # if burnRequested:
+            #     burnAttitudeReached = self._burn_attitude_reached()
         else:
             burnRequested = False
             burnAttitudeReached = False
@@ -619,7 +633,7 @@ class FswStack():
             # payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
             if self.formEnabled:
-                cmd = self._read_form_thr_cmd()
+                # cmd = self._read_form_thr_cmd()
 
                 self._log_mode_switching_logic(
                     currentSimMins=currentSimMins,
@@ -635,8 +649,8 @@ class FswStack():
                     critBat=critBat,
                     maxNoCom=maxNoCom,
                     emergencyExitFlag=exitEmergencyFlag,
-                    formAttRefInMsg=self.formAttRefInMsg.read().sigma_RN, # type: ignore
-                    formThrCmdInMsg=list(cmd.OnTimeRequest) if cmd is not None else None,
+                    # formAttRefInMsg=self.formAttRefInMsg.read().sigma_RN, # type: ignore
+                    # formThrCmdInMsg=list(cmd.OnTimeRequest) if cmd is not None else None,
                     thrOnTimeCmdOutMsg=None,
                     burnRequested=burnRequested,
                     burnAttitudeReached=burnAttitudeReached,
@@ -741,9 +755,12 @@ class FswStack():
         """
         if not self.formEnabled or self.formThrCmdInMsg is None:
             return False
+        
+        # logging.debug(f"[{self.logTag}] Attempting to read thruster command at iteration: {self.it}...")
 
         try:
             cmd = self._read_form_thr_cmd()
+            # logging.debug(f"[{self.logTag}] Printing read cmd: {cmd}")
             if cmd is None:
                 return False
             return any(float(t) > 0.0 for t in cmd.OnTimeRequest)
@@ -920,6 +937,26 @@ class FswStack():
             writer.writerow(row)
 
 
+    # def _setup_formation_control(self) -> None:
+    #     """
+    #     Defines the station keeping module.
+    #     """
+    #     assert self.sim.envModel.gravFactory is not None
+
+    #     self.form_ctrl.deputyTransInMsg.subscribeTo(self.nav.transOutMsg)
+    #     self.form_ctrl.attRefInMsg.subscribeTo(self.attRefMsg)
+    #     self.form_ctrl.thrustConfigInMsg.subscribeTo(self.fswThrusterConfigMsg)
+    #     self.form_ctrl.vehicleConfigInMsg.subscribeTo(SimBase.DynModels[self.spacecraftIndex].simpleMassPropsObject.vehicleConfigOutMsg)
+    #     self.form_ctrl.mu = self.sim.envModel.gravFactory.gravBodies["earth"].mu  # [m^3/s^2]
+    #     self.form_ctrl.attControlTime = 400  # [s]
+    #     messaging.AttRefMsg_C_addAuthor(self.form_ctrl.attRefOutMsg, self.attRefMsg)
+
+    #     # connect a blank chief message
+    #     chiefData = messaging.NavTransMsgPayload()
+    #     chiefMsg = messaging.NavTransMsg().write(chiefData)
+    #     self.form_ctrl.chiefTransInMsg.subscribeTo(chiefMsg)
+    
+    
     def _setup_fsw_recorders(self):
         """
         Initialize all fsw recorders

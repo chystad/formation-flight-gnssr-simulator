@@ -29,7 +29,7 @@ from Basilisk import __path__
 from Basilisk.architecture import messaging
 from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, eclipse,  
                                 exponentialAtmosphere, msisAtmosphere, dragDynamicEffector, 
-                                svIntegrators, reactionWheelStateEffector,
+                                svIntegrators, reactionWheelStateEffector, simpleMassProps,
                                 RWConfigPayload, groundLocation, thrusterDynamicEffector)
 from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower, fuelTank)
 from Basilisk.utilities import (orbitalMotion, 
@@ -117,6 +117,7 @@ class BasiliskDynamicsModel:
 
         # Initialize spacecraft instance
         self.scObj = spacecraft.Spacecraft()
+        self.simpleMassPropsObj = simpleMassProps.SimpleMassProps()
 
         # Disturbance effector modules
         self.dragEffector: Optional[dragDynamicEffector.DragDynamicEffector] = None
@@ -144,6 +145,7 @@ class BasiliskDynamicsModel:
         self.bat_state_msg: Optional[messaging.PowerStorageStatusMsg] = None
         self.gs_access_msgs: list[messaging.AccessMsg] = []
         self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
+        self.vehicle_config_out_msg: Optional[messaging.VehicleConfigMsg] = None
 
         # Recorders owned by this class
         self.batteryStateRecorder: BasiliskRecorder    # Battery charge
@@ -175,6 +177,7 @@ class BasiliskDynamicsModel:
 
         # Schedule all initialized modules to task
         sim.AddModelToTask(self.dynTaskName, self.scObj, 20)
+        sim.AddModelToTask(self.dynTaskName, self.simpleMassPropsObj, 19)
         if self.dragEffector is not None: 
             sim.AddModelToTask(self.dynTaskName, self.dragEffector, 20)
         if self.srpEffector is not None:
@@ -209,7 +212,7 @@ class BasiliskDynamicsModel:
     # Public helper functions #
     ###########################
 
-    def connect_fsw_cmd_to_rw_effector(self, fsw: FswStack) -> None:
+    def connect_fsw_torque_cmd_to_rw_effector(self, fsw: FswStack) -> None:
         """
         Connect the computed FSW RW torque to the RW effector
         TODO: Connect the computed thrust to the thruster effector
@@ -217,23 +220,6 @@ class BasiliskDynamicsModel:
         # Subscribe RWs to motor torque commands from the FSW 
         assert self.rwEffector is not None
         self.rwEffector.rwMotorCmdInMsg.subscribeTo(fsw.rwMotorTorqueOutMsg)
-
-    
-    # def connect_form_ctrl_cmds_to_thr_effector(self, formationControl: FormationControlStack) -> None:
-    #     """
-    #     [DEPRECIATED]
-    #     """
-    #     pass
-
-    #     # TODO: Uncomment once FSW has been expanded to output thruster commands
-    #     # # Subscribe thruster to firing commands from the FSW
-    #     # assert self.thrusterEffector is not None
-    #     # self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.thrOnTimeCmdOutMsg)
-
-    #     assert self.thrusterEffector is not None
-    #     self.thrusterEffector.cmdsInMsg.subscribeTo(
-    #         formationControl.form_thr_cmd_out_msgs[self.sat_idx]
-    #     )
 
 
     def connect_fsw_thr_cmd_to_thr_effector(self, fsw: FswStack) -> None:
@@ -252,8 +238,7 @@ class BasiliskDynamicsModel:
 
     def _setup_spacecraft_hub(self) -> None:
         """
-        Initialize the spacecraft hub and set initial conditions.
-        TODO: Modify init contition to use deployer case with random satellite ejection vector
+        Initialize the spacecraft hub and set initial conditions from deployer OEs + deploy velocity.
 
         The method sets the attribute:
             self.scObj (Spacecraft): Spacecraft instance containing hub parameters from cfg and initial conditions
@@ -280,8 +265,13 @@ class BasiliskDynamicsModel:
         self.scObj.hub.sigma_BNInit = self.sat.init_att  # orientation of Body(B) relative to inertial(N) expressed using MRP
         self.scObj.hub.omega_BN_BInit = self.sat.init_angvel  # [rad/s] angular velocity of Body(B) relative to inertial(N) expressed in (B)
 
+        # Wire simple spacecraft object to simple mass 
+        self.simpleMassPropsObj.ModelTag = f"SimpleMassProperties_{self.sat_idx}"
+        self.simpleMassPropsObj.scMassPropsInMsg.subscribeTo(self.scObj.scMassOutMsg)
+        
         # Assign msg attribute
         self.sc_state_out_msg = self.scObj.scStateOutMsg
+        self.vehicle_config_out_msg = self.simpleMassPropsObj.vehicleConfigOutMsg
         
         logging.debug(f"[{self.logTag}] Spacecraft hub initialized with initial conditions")
 

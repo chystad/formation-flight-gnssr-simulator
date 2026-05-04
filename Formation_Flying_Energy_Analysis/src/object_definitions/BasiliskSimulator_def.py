@@ -174,13 +174,13 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.integrators = []
         self.envModel: BasiliskEnvironmentModel
         self.envProcess: simulationArchTypes.ProcessBaseClass
-        self.formationControlStack: Optional[FormationControlStack] = None
-        self.formationControlProcess: simulationArchTypes.ProcessBaseClass
         
         self.dynProcesses: list[Optional[simulationArchTypes.ProcessBaseClass]] = [None] * self.numSatellites
         self.dynProcessNames: list[Optional[str]] = [None] * self.numSatellites
         self.fswProcesses: list[Optional[simulationArchTypes.ProcessBaseClass]] = [None] * self.numSatellites
         self.fswProcessNames: list[Optional[str]] = [None] * self.numSatellites
+        self.formCtrlProcesses:list[Optional[simulationArchTypes.ProcessBaseClass]] = [None] * self.numSatellites
+        self.formCtrlProcessNames:list[Optional[str]] = [None] * self.numSatellites
         self.scRuntimeBundles: list[Optional[SpacecraftRuntimeBundle]] = [None] * self.numSatellites
 
 
@@ -197,17 +197,18 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             # Build per-satellite components, dynamics and FSW, then bundle
             dynModel =        self._build_spacecraft_dynamics_model(sat_idx, sat)
             fsw =             self._build_spacecraft_fsw(sat_idx, sat, dynModel)
-            scRuntimeBundle = self._build_spacecraft_runtime_bundle(sat_idx, sat, dynModel, fsw)
+            formCtrl =        self._build_spacecraft_formation_control(sat_idx, sat, dynModel, fsw)
+            scRuntimeBundle = self._build_spacecraft_runtime_bundle(sat_idx, sat, dynModel, fsw, formCtrl)
 
             # Add bundle to stable list
             self.scRuntimeBundles[sat_idx] = scRuntimeBundle
 
 
         # ------------------------------------------------------------------
-        # 4) Formation control
+        # 4) Formation control wiring
         # ------------------------------------------------------------------
         if self.cfg.form_enabled:
-            self.formationControlStack = self._build_formation_control()
+            self._setup_all_formation_control_connections()
 
         # ------------------------------------------------------------------
         # 3) Visualization
@@ -274,9 +275,9 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
 
 
-    ###########################################
-    # Private scenario construction functions #
-    ###########################################
+    ########################################
+    # Private model construction functions #
+    ########################################
 
     def _build_environment_model(self) -> BasiliskEnvironmentModel:
         """
@@ -353,13 +354,41 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             sun_state_msg = self.envModel.spiceObj.planetStateOutMsgs[self.envModel.sun_idx], # TODO: Make attribute of env
             log_timestamp = self.cfg.timestamp_str
         )
-        dynModel.connect_fsw_cmd_to_rw_effector(fsw)
+        dynModel.connect_fsw_torque_cmd_to_rw_effector(fsw)
+        dynModel.connect_fsw_thr_cmd_to_thr_effector(fsw)
 
         return fsw
 
+
+    def _build_spacecraft_formation_control(self, sat_idx: int, sat: Satellite, 
+                                            dynModel: BasiliskDynamicsModel, fsw: FswStack,
+                                            ) -> Optional[FormationControlStack]:
+        """
+        
+        """
+        if not self.cfg.form_enabled:
+            return None
+        
+        # Create process
+        formationControlProcessName = f"FormationControlProcess_{sat_idx}"
+        self.formCtrlProcessNames[sat_idx] = formationControlProcessName
+        self.formCtrlProcesses[sat_idx] = self.CreateNewProcess(formationControlProcessName, 60)
+
+        # Initialize Formation control stack
+        formCtrl =  FormationControlStack(
+            sim=self,
+            sat=sat,
+            sat_idx=sat_idx,
+            dynModel=dynModel,
+            fsw=fsw
+        )
+
+        return formCtrl
+
     
     def _build_spacecraft_runtime_bundle(self, sat_idx: int, sat: Satellite, 
-                                         dynModel: BasiliskDynamicsModel, fsw: FswStack
+                                         dynModel: BasiliskDynamicsModel, fsw: FswStack,
+                                         formCtrl: Optional[FormationControlStack]
                                          ) -> SpacecraftRuntimeBundle:
         """
         Bundle per-satellite models together into a SpacecraftRuntimeBundle instance 
@@ -372,34 +401,45 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             sat = sat,
             scObj = dynModel.scObj,
             dynModel = dynModel,
-            fsw = fsw
+            fsw = fsw,
+            formCtrl=formCtrl
         )
 
         return scRuntimeBundle
     
 
-    def _build_formation_control(self) -> FormationControlStack:
+    def _setup_all_formation_control_connections(self) -> None:
+        """
+        Connect every spacecraft's formation control module to the chief translational state
+        NOTE: The method assumes that the chief satellite has sat_idx == 0
         """
         
-        """
-        # Create process
-        self.formationControlProcessName = "FormationControlProcess"
-        self.formationControlProcess = self.CreateNewProcess(self.formationControlProcessName, 300)
+        scRuntimeBundles = [b for b in self.scRuntimeBundles if b is not None]
+        if len(scRuntimeBundles) != len(self.scRuntimeBundles):
+            raise ValueError(f"'None' elements were present in self.scRuntimeBundles")
 
-        # Initialize Formation control stack
-        formationControl =  FormationControlStack(
-            sim=self,
-            cfg=self.cfg,
-            scRuntimeBundles=[b for b in self.scRuntimeBundles if b is not None], # filters out None
-        )
+        if not self.cfg.form_enabled:
+            return
+        
+        # Extract chief bundle
+        chiefBundle = scRuntimeBundles[0]
 
-        # Connect 
-        for sat_idx, bundle in enumerate(self.scRuntimeBundles):
-            assert bundle is not None
-            bundle.fsw.connect_form_ctrl_cmds_to_fsw(formationControl)
-            bundle.dynModel.connect_fsw_thr_cmd_to_thr_effector(bundle.fsw)
+        # Connect each spacecraft's formation control module to the chief translational state
+        for sat_idx in range(len(scRuntimeBundles)):
+            scBundle = scRuntimeBundles[sat_idx]
 
-        return formationControl
+            # Connect chief translational state to spacecraftReconfig model
+            assert scBundle.formCtrl is not None
+            scBundle.formCtrl.connect_chief_trans_to_form_ctrl(chiefBundle.fsw)
+
+            # Connect spacecraftReconfig command outputs to fsw
+            scBundle.fsw.connect_form_ctrl_cmds_to_fsw(scBundle.formCtrl)
+
+
+
+    
+
+    
 
 
 
