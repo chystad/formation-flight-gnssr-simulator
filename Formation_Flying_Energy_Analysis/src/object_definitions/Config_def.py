@@ -145,6 +145,9 @@ class Config:
         )
 
         # TODO: Validate formation control parameters
+        self.validate_formation_parameters(
+            form_type
+        )
         
         # Validate RW parameters
         self.validate_rw_parameters(
@@ -872,6 +875,21 @@ class Config:
         else: 
             raise ValueError(f"Unexpected type given for 'data_mode'. "
                              f"Got '{type(data_mode)}', expected 'str'")
+        
+
+    def validate_formation_parameters(self,
+                                      form_type: str) -> None:
+
+        # ============ Check 'form_type' is type str and is an acceptable string
+        form_type_acceptable_strs = ['cat',  'cpo', 'cc']
+        if isinstance(form_type, str):
+            if not form_type in form_type_acceptable_strs:
+                raise ValueError(f"Unexpected value given for 'form_type'. "
+                                 f"Got '{form_type}', expected {form_type_acceptable_strs})")
+
+        else:
+            raise ValueError(f"Unexpected type given for 'form_type'. "
+                             f"Got '{type(form_type)}', expected 'str'")
 
 
 
