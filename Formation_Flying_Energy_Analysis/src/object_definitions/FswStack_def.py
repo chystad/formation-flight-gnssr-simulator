@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     # This is done to prevent the "low-level" environmental models being dependent 
     # on the "high-level" orchestrator
     from object_definitions.BasiliskSimulator_def import BasiliskSimulator 
-    from object_definitions.FormationControlStack_def import FormationControlStack
 
 LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 

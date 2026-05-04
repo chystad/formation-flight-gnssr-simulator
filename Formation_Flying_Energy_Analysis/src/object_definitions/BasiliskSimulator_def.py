@@ -33,7 +33,6 @@ from object_definitions.SimData_def import (SpacecraftSimData, MissionSimData)
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimDataWriter_def import SimDataWriter
-from object_definitions.FormationControlStack_def import FormationControlStack
 from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel

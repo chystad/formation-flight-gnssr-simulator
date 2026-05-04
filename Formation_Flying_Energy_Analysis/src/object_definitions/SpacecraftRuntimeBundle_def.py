@@ -11,7 +11,6 @@ from Basilisk.simulation import spacecraft
 from object_definitions.Satellite_def import Satellite
 from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.FswStack_def import FswStack
-from object_definitions.FormationControlStack_def import FormationControlStack
 
 
 @dataclass
