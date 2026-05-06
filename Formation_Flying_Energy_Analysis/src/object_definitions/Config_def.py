@@ -141,6 +141,7 @@ class Config:
 
         # Validate simulation parameters
         self.validate_sim_parameters(
+            simulationDuration,
             data_mode
         )
 
@@ -861,11 +862,28 @@ class Config:
 
 
     def validate_sim_parameters(self,
+                                simulationDuration: float,
                                 data_mode: str,
                                 ) -> None:
         """
-        
+        Validate global simulation parameters.
+
+        If the user selects debug data mode for a long simulation, explicitly
+        warn about the risk of runaway RAM usage and require confirmation
+        before continuing.
         """
+
+        # ============ Check 'simulationDuration' is a valid number
+        if not isinstance(simulationDuration, float):
+            try:
+                simulationDuration = float(simulationDuration)
+            except Exception:
+                raise ValueError(f"Unexpected type given for 'simulationDuration'. "
+                                 f"Got '{type(simulationDuration)}', expected 'float'")
+
+        if simulationDuration <= 0:
+            raise ValueError(f"Expected 'simulationDuration' to be greater than 0. "
+                             f"Got {simulationDuration}")
 
         # ============ Check 'data_mode' is type str and is an acceptable string
         if isinstance(data_mode, str):
@@ -875,6 +893,26 @@ class Config:
         else: 
             raise ValueError(f"Unexpected type given for 'data_mode'. "
                              f"Got '{type(data_mode)}', expected 'str'")
+
+        # ============ Warn user about long debug-mode simulations
+        if (simulationDuration > 48.0) and (data_mode == "debug"):
+            prompt = (
+                f"You have selected data_mode: 'debug' and simulationDuration: {simulationDuration}\n"
+                "[WARNING] Running the simulator in 'debug' mode with simulation duration > 48 hours "
+                "can cause runaway RAM usage. No data will be stored if the simulator crashes during a run.\n"
+                "Do you wish to continue? [Y/n] "
+            )
+
+            while True:
+                user_input = input(prompt).strip()
+
+                if user_input == "Y":
+                    return
+
+                if user_input == "n":
+                    raise SystemExit("Simulation aborted by user due to long debug-mode run.")
+
+                print("Unrecognized input. Please enter 'Y' to continue or 'n' to exit.")
         
 
     def validate_formation_parameters(self,

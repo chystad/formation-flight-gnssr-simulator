@@ -33,7 +33,7 @@ from Basilisk.simulation import (spacecraft, radiationPressure, spiceInterface, 
                                 svIntegrators, reactionWheelStateEffector, simpleMassProps,
                                 RWConfigPayload, groundLocation, thrusterDynamicEffector)
 from Basilisk.simulation import (simplePowerSink, simpleSolarPanel, simpleBattery, ReactionWheelPower, fuelTank)
-from Basilisk.utilities import (orbitalMotion, fswSetupThrusters, 
+from Basilisk.utilities import (orbitalMotion, fswSetupThrusters, macros,
                                 unitTestSupport, simIncludeRW, simIncludeThruster)
 
 BasiliskRecorder: TypeAlias = Any # To avoid spreading 'Any' type to make intent clearer
@@ -260,9 +260,25 @@ class BasiliskDynamicsModel:
         deployVel = self.sat.deployment_vel
         mu = self.envModel.gravFactory.gravBodies["earth"].mu
 
+        ############### DEBUG
+        oe = orbitalMotion.ClassicElements()
+        oe.a = 1.4*6371000  # meters
+        oe.e = 0.0
+        oe.i = 45.0 * macros.D2R
+        oe.Omega = 48.2 * macros.D2R
+        oe.omega = 347.8 * macros.D2R
+        oe.f = 85.3 * macros.D2R
+
+        if self.sat_idx == 1:
+            oe.f *= 1.001
+        if self.sat_idx == 2:
+            oe.f *= 0.999
+
+        #######################
+
         # Convert OEs to initial states and add the deployment velocity
         rN, vN = orbitalMotion.elem2rv(mu, oe)
-        vN += deployVel 
+        # vN += deployVel 
  
         # Set the initial conditions for the spacecraft object
         self.scObj.hub.r_CN_NInit = rN  # [m]   r_BN_N
@@ -610,8 +626,8 @@ class BasiliskDynamicsModel:
         fuelTankModel.propMassInit = fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
         fuelTankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
         fuelTankEffector.r_TB_B = [[0.0], [0.0], [0.0]]
-        fuelTankModel.radiusTankInit = 0.05 # [m] The tank kan only have 1/2 side length radius for a 6U sat
-        fuelTankModel.lengthTank = 0.2 # [m] The tank occupies ~2U of the satellite with V = 2pi x 0.05m x 0.2m
+        fuelTankModel.radiusTankInit = 1 # 0.05 # [m] The tank kan only have 1/2 side length radius for a 6U sat
+        fuelTankModel.lengthTank = 1 #0.2 # [m] The tank occupies ~2U of the satellite with V = 2pi x 0.05m x 0.2m
         
         # Add the tank and connect the thrusters
         self.scObj.addStateEffector(fuelTankEffector)
@@ -768,7 +784,7 @@ class BasiliskDynamicsModel:
         self.fuelTankStateRecorder_RateNanos = fuelTankStateRate
 
         # Optional 'debug' recorders
-        if self.sim.cfg.data_mode == "debug":
+        if self.sim.cfg.data_mode == "debug" and (not self.sim.cfg.mc_enabled):
             # Thruster recorder
             self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(thrusterStateRate) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (thrustTorquePntB_B) [Nm]
             self.thrusterStateRecorder_RateNanos = thrusterStateRate

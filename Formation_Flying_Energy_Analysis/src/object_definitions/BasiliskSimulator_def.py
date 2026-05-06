@@ -33,25 +33,27 @@ from object_definitions.SimData_def import (SpacecraftSimData, MissionSimData)
 from object_definitions.FswStack_def import FswStack
 from object_definitions.Satellite_def import Satellite
 from object_definitions.SimDataWriter_def import SimDataWriter
+from object_definitions.RecorderFlusher_def import RecorderFlusher
 from object_definitions.BasiliskDynamicsModel_def import BasiliskDynamicsModel
 from object_definitions.SpacecraftRuntimeBundle_def import SpacecraftRuntimeBundle
 from object_definitions.BasiliskEnvironmentModel_def import BasiliskEnvironmentModel
 
 import plotting.debug_plotting as plt
 
+from constants import(
+    VIZARD_SAVE_PATH,
 
-VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_Flying_Energy_Analysis/output_data/_VizFiles/bsk_sim.bin"
+    ENV_RATE,
+    DYN_RATE,
+    FSW_RATE,
+    FORM_CTRL_RATE,
+    MSIS_RATE,
+    FLUSH_RATE,
 
-# Model rates [sec] TODO: Move to Config
-ENV_RATE: float = 0.5 # [s/update] Update rate for environment models
-DYN_RATE: float = 0.5 # [s/update] Update rate for dynamical models
-FSW_RATE: float = 0.5 # [s/update] Update rate for flight software stack
-FORM_CTRL_RATE: float = 0.5 # [s/update] TODO: Update rate for the formation flight stack 
-MSIS_RATE: float = 30. # [s/update] Update rate for MSIS input parameters
-
-HIGH_SAMPLE_RATE: float = 0.5 # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
-MID_SAMPLE_RATE: float = 5. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
-LOW_SAMPLE_RATE: float = 30. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
+    HIGH_SAMPLE_RATE,
+    MID_SAMPLE_RATE,
+    LOW_SAMPLE_RATE,
+)
 
 
 class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
@@ -122,6 +124,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
     |---FormationControlProcess
         |
         |---TODO
+    |
+    |---RecorderFlusherProcess
     """
 
     def __init__(self, cfg: Config) -> None:
@@ -140,6 +144,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.fswRateNanos: int =    macros.sec2nano(FSW_RATE)
         self.formCtrlRateNanos: int = macros.sec2nano(FORM_CTRL_RATE)
         self.msisRateNanos: int =   macros.sec2nano(MSIS_RATE)
+        self.recorderFlusherRateNanos: int = macros.hour2nano(FLUSH_RATE)
 
         self.highSampleRateNanos: int = macros.sec2nano(HIGH_SAMPLE_RATE)
         self.midSampleRateNanos: int   = macros.sec2nano(MID_SAMPLE_RATE)
@@ -173,6 +178,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.integrators = []
         self.envModel: BasiliskEnvironmentModel
         self.envProcess: simulationArchTypes.ProcessBaseClass
+        self.recorderFlusherProcess: simulationArchTypes.ProcessBaseClass
         
         self.dynProcesses: list[Optional[simulationArchTypes.ProcessBaseClass]] = [None] * self.numSatellites
         self.dynProcessNames: list[Optional[str]] = [None] * self.numSatellites
@@ -196,7 +202,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             # Build per-satellite components, dynamics and FSW, then bundle
             dynModel =        self._build_spacecraft_dynamics_model(sat_idx, sat)
             fsw =             self._build_spacecraft_fsw(sat_idx, sat, dynModel)
-            # formCtrl =        self._build_spacecraft_formation_control(sat_idx, sat, dynModel, fsw)
             scRuntimeBundle = self._build_spacecraft_runtime_bundle(sat_idx, sat, dynModel, fsw)
 
             # Add bundle to stable list
@@ -204,20 +209,28 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
 
 
         # ------------------------------------------------------------------
-        # 4) Formation control wiring
+        # 3) Formation control wiring
         # ------------------------------------------------------------------
         if self.cfg.form_enabled:
             self._connect_chief_trans_to_all_formation_controls()
 
+
         # ------------------------------------------------------------------
-        # 3) Visualization
+        # 4) Setup recorder flusher
+        # ------------------------------------------------------------------
+        if self.cfg.mc_enabled or (not self.cfg.data_mode == "debug"):
+            self._setup_recorder_flusher()
+
+
+        # ------------------------------------------------------------------
+        # 5) Visualization
         # ------------------------------------------------------------------
         if (not self.cfg.mc_enabled) and (len(self.scRuntimeBundles) > 0):
             self._configure_vizard()
             
 
         # ------------------------------------------------------------------
-        # 4) Initialize and configure stop time
+        # 6) Initialize and configure stop time
         # ------------------------------------------------------------------
         self.SetProgressBar(True)
         self.InitializeSimulation()
@@ -249,26 +262,42 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         """
         logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")        
 
-        # Extract mission data from recorders
-        missionSimData: MissionSimData # TODO
+        
+        
+        # # Extract mission data from recorders
+        # missionSimData: MissionSimData # TODO
 
-        # Extract data for each spacecraft
-        simData = SimData(self.cfg)
-        scSimDataList = simData.pull_every_spacecraft_data(self.scRuntimeBundles)
+        # # Write data to files using a 'SimDataWriter' helper object
+        # dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
+        # dataWriter.write_data_to_files()
+        # del dataWriter # free up buffer
 
-        # Write data to files using a 'SimDataWriter' helper object
-        dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
-        dataWriter.write_data_to_files()
-        del dataWriter # free up buffer
+        if self.cfg.mc_enabled or (not self.cfg.data_mode == "debug"):
+            # Output tail data and reset recorders
+            if hasattr(self, "recorderFlusher"):
+                self.recorderFlusher.flush()
 
-        # Only create plots after a sim run if in debug mode. Data size will be too large otherwise
-        if self.cfg.data_mode == "debug" and (not self.cfg.mc_enabled):
+        # Only create plots after a sim run if in "debug" mode. Data size will be too large otherwise
+        else:
+            # Extract data for each spacecraft
+            simData = SimData(self.cfg)
+            scSimDataList = simData.pull_every_spacecraft_data(self.scRuntimeBundles)
+
+            # Write data to files using a 'SimDataWriter' helper object
+            dataWriter = SimDataWriter(self.cfg, scSimDataList, missionSimData=None)
+            dataWriter.write_data_to_files()
+            del dataWriter # free up buffer
+
             plt.plot_all_formation_plots(scSimDataList)
             plt.plot_all_thruster_fuel_plots(scSimDataList)
+            plt.plot_all_per_satellite_GNC_plots(scSimDataList, sat_idx=1)
             plt.mpl.show()
 
-        # Release data
-        del scSimDataList
+            # Release data
+            del scSimDataList
+            
+
+        
         
 
 
@@ -433,10 +462,25 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             scBundle.fsw.connect_chief_trans_to_form_ctrl(chiefBundle.fsw)
 
 
+    def _setup_recorder_flusher(self) -> None:
+        """
+        
+        """
+        self.recorderFlusherProcessName = "recorderFlusherProcess"
+        self.recorderFlusherTaskName = "recorderFlusherTask"
 
-    
+        self.recorderFlusherProcess = self.CreateNewProcess(self.recorderFlusherProcessName)
+        self.recorderFlusherProcess.addTask(
+            self.CreateNewTask(self.recorderFlusherTaskName, self.recorderFlusherRateNanos)
+        )
 
-    
+        self.recorderFlusher = RecorderFlusher(
+            cfg=self.cfg,
+            sc_runtime_bundles=self.scRuntimeBundles,
+        )
+
+        self.AddModelToTask(self.recorderFlusherTaskName, self.recorderFlusher)
+
 
 
 

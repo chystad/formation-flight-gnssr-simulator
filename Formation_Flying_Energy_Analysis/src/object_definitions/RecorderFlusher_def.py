@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import os
+import gc
+import psutil
+
 import h5py
 import numpy as np
 from numpy.typing import NDArray
@@ -75,6 +79,9 @@ class RecorderFlusher(sysModel.SysModel):
         self.flush(CurrentSimNanos)
 
     def flush(self, CurrentSimNanos: int | None = None) -> None:
+
+        proc = psutil.Process(os.getpid())
+        logging.debug(f"[{self.logTag}] RSS = {proc.memory_info().rss / 1e9:.2f} GB before flush")
         
         bundles = [b for b in self.sc_runtime_bundles if b is not None]
         if len(bundles) == 0:
@@ -118,6 +125,10 @@ class RecorderFlusher(sysModel.SysModel):
             )
 
         del chunks
+        gc.collect()
+
+        logging.debug(f"[{self.logTag}] RSS = {proc.memory_info().rss / 1e9:.2f} GB after flush")
+
 
     def _collect_spacecraft_chunk(
         self,

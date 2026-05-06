@@ -31,7 +31,7 @@ LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 BURN_ATT_TOLERANCE: float = 0.01 # MRP norm
 BURN_RATE_TOLERANCE: float = 0.01 # rate norm
 
-MRP_K: float = 0.01 # MRP pointing controller: Gain on MRP attitude error 
+MRP_K: float = 0.001 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
 SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
@@ -771,13 +771,19 @@ class FswStack():
 
             # TODO: Calculate the desired OED to get the desired separation given circular cheif orbit
 
-            self.form_ctrl.targetClassicOED = [
-                0.0, # da/a
-                0.0, # de
-                0.0, # di
-                0.0, # dOmega
-                0.0, # domega
-                -0.01*self.sat_idx] # dM
+            if self.sat_idx == 1:
+                self.form_ctrl.targetClassicOED = [0.0000, 0.000, 0.0000, 0.0000, 0.0000, -0.003]
+
+            if self.sat_idx == 2:
+                self.form_ctrl.targetClassicOED = [0.0000, 0.000, 0.000, 0.0000, 0.0000, 0.003]
+            
+            # self.form_ctrl.targetClassicOED = [
+            #     0.0, # da/a
+            #     0.0, # de
+            #     0.0, # di
+            #     0.0, # dOmega
+            #     0.0, # domega
+            #     -0.01*self.sat_idx] # dM
 
         else: 
             raise ValueError(f"Formation types other than 'constant along-track separation has not yet been implemented")
@@ -855,7 +861,7 @@ class FswStack():
         self.navTransRecorder_RateNanos = navTransRate
         
         # Optional 'debug' recorders
-        if self.sim.cfg.data_mode == "debug":
+        if self.sim.cfg.data_mode == "debug" and (not self.sim.cfg.mc_enabled):
             # Attitude and angular rate recorder
             self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
             self.navAttRecorder_RateNanos =  navAttRate
