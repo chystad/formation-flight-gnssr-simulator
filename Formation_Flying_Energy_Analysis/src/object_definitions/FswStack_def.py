@@ -40,8 +40,10 @@ EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.6 # The lower limit for when the battery is
 CAPTURE_BATTERY_THRESHOLD = 0.4 # The minimum battery percentage (inclusive) required for entering CAPTURE mode (0, 1)
 COMMS_BATTERY_THRESHOLD = 0.3 # The minimum battery percentage (inclusive) required for entering COMMS mode (0, 1)
 CRITICAL_BATTERY_THRESHOLD = 0.2 # Upper limit (exclusive) for when the battery is considered to have critially low charge left (0, 1)
-MAX_HOURS_SINCE_LAST_COM_THRESHOLD = 48 # Limit (incluse) for when the maximum time has passed since last com. 
+LOW_BATTERY_THRESHOLD = 0.4 # Upper limit (exclusive) for when the battery is considere to have low charge left (0.1)
+MAX_HOURS_SINCE_LAST_COM_THRESHOLD = 12 # Limit (incluse) for when the maximum time has passed since last com. 
                                         # After this, communication will be prioritized over payload capturing.
+MIN_MINUTES_COM_TIME = 10. # Minimum time a comunication event should last, if comunication is feasible 
 
 
 class PointingMode(str, Enum):
@@ -49,7 +51,6 @@ class PointingMode(str, Enum):
     COMMS = "comms"
     CHARGE = "charge"
     CAPTURE = "capture"
-    FORM_CAPTURE = "form_capture" # TODO: Placeholder mode for when
     BURN_TRANSIT = "burn_transit"
     BURN = "burn"
     EMERGENCY = "emergency"
@@ -148,6 +149,8 @@ class FswStack():
         self.fuelTankMsg = fuel_tank_msg
         self.logTimestamp = log_timestamp
         self.lastCommsNanos = 0
+        self.currentCommsStartNanos = 0
+        self.lowBatIsUnresolved = False # True if the battery has been charged enough to exit the low state
         self.ModelTag = f"RwFswStack{sat_idx}"
         self.logTag = f"FSW{sat_idx}"
         self.pointingMode = PointingMode.COAST
@@ -457,9 +460,59 @@ class FswStack():
 
     def _capture_desired_att(self) -> NDArray[np.float64]:
         """
-        TODO
+        Point the GNSS-R payload antenna toward nadir (and GNSS receiver zenith) 
+        while keeping the solar panels as aligned with the Sun as possible.
+
+        Because the payload is mounted on the same Body-axis as the largest solar panel area, 
+        the second largest solar panel area mounted on +X face is directed towards the sun aswell. 
+
+        Desired body-frame alignment:
+            - Body -Z axis points toward Earth center
+            - Body +X axis points along the Sun vector projected into the plane
+            normal to the nadir direction
         """
-        return np.array([0., 0., 1.])
+
+        # Get spacecraft position relative to Earth in inertial frame
+        r_BN_N = np.array(self.nav.transOutMsg.read().r_BN_N)
+
+        # Vector from spacecraft body origin B to Earth center E, expressed in N.
+        # Here E is the Earth-centered inertial origin, so r_EN_N = 0 and:
+        #   r_EB_N = r_EN_N - r_BN_N = -r_BN_N
+        r_EB_N = -r_BN_N
+        r_EB_N_hat = r_EB_N / np.linalg.norm(r_EB_N)
+
+        # Get Sun position vector relative to Earth in inertial frame
+        r_SN_N = np.array(self.sunStateMsg.read().PositionVector)
+
+        # Unit vector from spacecraft body origin B to the Sun, expressed in N
+        r_SB_N = r_SN_N - r_BN_N
+        r_SB_N_hat = r_SB_N / np.linalg.norm(r_SB_N)
+
+        # Project the Sun vector into the plane normal to r_EB_N.
+        # This gives the desired +X body-axis direction as close to the Sun as possible,
+        # while preserving the nadir-pointing -Z constraint.
+        s = r_SB_N_hat - (
+            np.dot(r_SB_N_hat, r_EB_N_hat) / np.linalg.norm(r_EB_N_hat) ** 2
+        ) * r_EB_N_hat
+        s_hat = s / np.linalg.norm(s)
+
+        # Desired body axes expressed in inertial frame.
+        # Body -Z points toward Earth center:
+        #   -z_hat = r_EB_N_hat  =>  z_hat = -r_EB_N_hat
+        x_hat = s_hat
+        z_hat = -r_EB_N_hat
+        y_hat = np.cross(z_hat, x_hat)
+
+        # Recompute x_hat to enforce orthogonality numerically.
+        x_hat = np.cross(y_hat, z_hat)
+
+        # Direction cosine matrix for the desired attitude
+        C_DN_N = np.vstack((x_hat, y_hat, z_hat))
+
+        # Convert into desired Modified Rodrigues Parameters
+        mrp_D = rbk.C2MRP(C_DN_N)
+
+        return mrp_D
 
 
     def _emergency_desired_att(self) -> NDArray[np.float64]:
@@ -522,8 +575,15 @@ class FswStack():
 
         # Initialize time-dependent logical parameters
         maxNoCom = False # True if the duration since exiting COMMS last time exceeds a max threshold
+        comEventComplete = True # True if comunication event duration has extended a min threshold
         
         
+        # ---- Decide if the spacecraft can capture scientific data (set canCap) ---- 
+        canCap = True # This is a major assumption stating that the 
+                      # GNSS-constellation-GNSS-R-satellite geometry always allows observations
+        # NOTE: This will potentially override other feasible states, so measures must be taken to avoid this
+
+
         # ---- Decide if the spacecraft can charge (set canChar) ---- 
         # Fraction of illumination due to eclipse. 0 = fully shadowed, 1 = fully illuminated.
         shadowFac = self.sunEclipseMsg.read().shadowFactor 
@@ -581,7 +641,18 @@ class FswStack():
             else:
                 exitEmergencyFlag = False
 
+            # set self.lowBatIsUnresolved
+            if self.pointingMode != PointingMode.EMERGENCY:
+                if (not self.lowBatIsUnresolved) and (batStorageFrac < LOW_BATTERY_THRESHOLD):
+                    self.lowBatIsUnresolved = True
 
+                elif self.lowBatIsUnresolved and (batStorageFrac >= EMERGENCY_BATTERY_EXIT_THRESHOLD):
+                    self.lowBatIsUnresolved = False
+            else:
+                # Emergency mode overrides mode switching logic instead
+                self.lowBatIsUnresolved = False
+
+            
         # ---- Evaluate the time since last communication (set maxNoCom) ---- #
         hoursSinceLastComms = (CurrentSimNanos - self.lastCommsNanos) * macros.NANO2HOUR
         if hoursSinceLastComms >= MAX_HOURS_SINCE_LAST_COM_THRESHOLD:
@@ -590,13 +661,26 @@ class FswStack():
             maxNoCom = False
 
 
+        # ---- Evaluate if time spent in comunication mode (set comEventComplete) ---- #
+        if old_pointing_mode == PointingMode.COMMS:
+            minutesSinceComStart = (CurrentSimNanos - self.currentCommsStartNanos) * macros.NANO2MIN
+            
+            if minutesSinceComStart > MIN_MINUTES_COM_TIME:
+                comEventComplete = True
+            else:
+                comEventComplete = False
+
+
         # ---- Decide if spacecraft burn is requested, and if so, is the requested attitude reached (set burnRequested, burnAttitudeReached) ---- #
         # if self.formEnabled and self.sat_idx != 0:
         #     burnRequested = self._formation_burn_requested()
-        #     # logging.debug(f"[{self.logTag}] burnRequested: {burnRequested}")
-        #     self.it += 1
-        #     # if burnRequested:
-        #     #     burnAttitudeReached = self._burn_attitude_reached()
+
+        #     if burnRequested:
+        #         logging.debug(f"[{self.logTag}] burn requested @ t={CurrentSimNanos * macros.NANO2MIN} min")
+        #         # burnAttitudeReached = self._burn_attitude_reached()
+                
+        #     else:
+        #         burnAttitudeReached = False
         # else:
         #     burnRequested = False
         #     burnAttitudeReached = False
@@ -613,6 +697,11 @@ class FswStack():
         else:
             capPossible = False
 
+        if (old_pointing_mode == PointingMode.COMMS) and (not comEventComplete) and canCom:
+            continueComEvent = True
+        else:
+            continueComEvent = False
+
         
         # ---- Mode switching logic ---- #
         if critBat or (self.pointingMode == PointingMode.EMERGENCY and not exitEmergencyFlag):
@@ -627,22 +716,28 @@ class FswStack():
 
         # Normal formation-independent operations
         elif not maxNoCom:
-            if capPossible:
-                nextMode = PointingMode.CAPTURE
-            elif comPossible:
+            if continueComEvent:                        # 1. Finishing current comunication event
                 nextMode = PointingMode.COMMS
-            elif canChar:
+            elif self.lowBatIsUnresolved and canChar:   # 2. Prevent further decreasing battery level if already low by charging
                 nextMode = PointingMode.CHARGE
-            else:
+            elif capPossible:                           # 3. Capture scientific GNSS-R data
+                nextMode = PointingMode.CAPTURE
+            elif comPossible:                           # 4. Ground station communication 
+                nextMode = PointingMode.COMMS
+            elif canChar:                               # 5. Charge
+                nextMode = PointingMode.CHARGE
+            else:                                       # 6. Coast
                 nextMode = PointingMode.COAST
         elif maxNoCom:
-            if comPossible:
+            if comPossible or continueComEvent:         # 1. Ground station communication
                 nextMode = PointingMode.COMMS
-            elif capPossible:
-                nextMode = PointingMode.CAPTURE
-            elif canChar:
+            elif self.lowBatIsUnresolved and canChar:   # 2. Prevent further decreasing battery level if already low by charging
                 nextMode = PointingMode.CHARGE
-            else:
+            elif capPossible:                           # 3. Capture scientific data
+                nextMode = PointingMode.CAPTURE
+            elif canChar:                               # 4. Charge
+                nextMode = PointingMode.CHARGE
+            else:                                       # 5. Coast
                 nextMode = PointingMode.COAST
         else:
             nextMode = PointingMode.ERROR
@@ -660,13 +755,12 @@ class FswStack():
                 self.lastCommsNanos = CurrentSimNanos
                 hoursSinceLastComms = 0.
 
+            # Update self.currentCommsStartNanos
+            if self.pointingMode == PointingMode.COMMS:
+                self.currentCommsStartNanos = CurrentSimNanos
+
             self._evaluate_active_eps_components(old_pointing_mode, self.pointingMode, CurrentSimNanos)
 
-            # Temp:
-            # req = self.formThrCmdInMsg.read() # type: ignore
-
-            # payload = messaging.THRArrayOnTimeCmdMsgPayload()
-            # payload.OnTimeRequest = [float(t) for t in req.OnTimeRequest]
             currentSimMins = CurrentSimNanos * macros.NANO2MIN
             if self.formEnabled:
                 # cmd = self._read_form_thr_cmd()
@@ -718,10 +812,6 @@ class FswStack():
         """
         Updates the desired MRP oerientation 'self.guid.sigma_R0N' based on the current pointing mode
         """
-        self.guid.sigma_R0N = [0.0, 0.0, 1.0]
-
-        # Default: no thrust command given unless given by BURN mode.
-        # self._publish_zero_thruster_cmd(CurrentSimNanos)
 
         match self.pointingMode:
             case PointingMode.COAST:
@@ -736,26 +826,18 @@ class FswStack():
             case PointingMode.CAPTURE:
                 self.guid.sigma_R0N = self._capture_desired_att()
 
-            # case PointingMode.BURN_TRANSIT:
-            #     att_ref = self._read_form_att_ref()
-            #     if att_ref is not None:
-            #         self.guid.sigma_R0N = list(att_ref.sigma_RN)
-            #     else:
-            #         self.guid.sigma_R0N = [0.0, 0.0, 0.0]
+            case PointingMode.BURN_TRANSIT:
+                pass # The attitude is overridden by formation controller
 
-            # case PointingMode.BURN:
-            #     att_ref = self._read_form_att_ref()
-            #     if att_ref is not None:
-            #         self.guid.sigma_R0N = list(att_ref.sigma_RN)
-            #     else:
-            #         self.guid.sigma_R0N = [0.0, 0.0, 0.0]
-            #     self._publish_requested_thruster_cmd(CurrentSimNanos)
+            case PointingMode.BURN:
+                pass # The attitude is overridden by formation controller
             
             case PointingMode.EMERGENCY:
                 self.guid.sigma_R0N = self._emergency_desired_att()
 
             case _:
                 logging.debug(f"[{self.logTag}] Undefined pointing mode '{self.pointingMode}' reached for '{self.scModelTag}'")
+                self.guid.sigma_R0N = [0.0, 0.0, 1.0]
                 raise ValueError("")
             
 
@@ -783,6 +865,7 @@ class FswStack():
         self.form_ctrl.chiefTransInMsg.subscribeTo(chiefMsg)
 
 
+
     def _setup_desired_OE_difference(self) -> None:
         """
         Calculates and sets the desired classic orbital element difference dependinng on the selected formation type
@@ -808,17 +891,9 @@ class FswStack():
 
             if self.sat_idx == 1:
                 self.form_ctrl.targetClassicOED = [0.0000, eps, eps, 0.0000, 0.0000, -0.003]
-
             if self.sat_idx == 2:
                 self.form_ctrl.targetClassicOED = [0.0000, 2*eps, 2*eps, 0.0000, 0.0000, 0.003]
-            
-            # self.form_ctrl.targetClassicOED = [
-            #     0.0, # da/a
-            #     0.0, # de
-            #     0.0, # di
-            #     0.0, # dOmega
-            #     0.0, # domega
-            #     -0.01*self.sat_idx] # dM
+
 
         elif self.sim.cfg.form_type == "cc":
 
@@ -829,14 +904,13 @@ class FswStack():
 
             if self.sat_idx == 1:
                 self.form_ctrl.targetClassicOED = [
-                    0., 
-                    eps, 
-                    eps, 
-                    0., 
-                    0., 
-                    0.
+                    0., # da/a
+                    eps, # de
+                    eps, #di
+                    0., # dOmega
+                    0., #domega
+                    0.  # dM
                 ]
-
             if self.sat_idx == 2:
                 self.form_ctrl.targetClassicOED = [
                     0., 
@@ -902,83 +976,6 @@ class FswStack():
         
 
         logging.debug(f"[{self.logTag}] EPS component status messages initialized")
-
-
-    def _evaluate_active_eps_components(
-        self,
-        oldPM: PointingMode,
-        newPM: PointingMode,
-        CurrentSimNanos: int,
-    ) -> None:
-        if self.com_status_msg is None:
-            raise RuntimeError("com_status_msg has not been initialized.")
-        if self.pay_status_msg is None:
-            raise RuntimeError("pay_status_msg has not been initialized.")
-        if self.prop_idle_status_msg is None:
-            raise RuntimeError("prop_idle_status_msg has not been initialized.")
-        if self.prop_heat_status_msg is None:
-            raise RuntimeError("prop_heat_status_msg has not been initialized.")
-        if self.prop_thr_status_msg is None:
-            raise RuntimeError("prop_thr_status_msg has not been initialized.")
-
-        def write_status(msg: messaging.DeviceStatusMsg, enabled: bool) -> None:
-            payload = messaging.DeviceStatusMsgPayload()
-            payload.deviceStatus = 1 if enabled else 0
-            msg.write(payload, CurrentSimNanos)
-
-        # Communication sink
-        if newPM == PointingMode.COMMS:
-            write_status(self.com_status_msg, True)
-        if oldPM == PointingMode.COMMS:
-            write_status(self.com_status_msg, False)
-
-        # Payload sink
-        if newPM == PointingMode.CAPTURE:
-            write_status(self.pay_status_msg, True)
-        if oldPM == PointingMode.CAPTURE:
-            write_status(self.pay_status_msg, False)
-
-        # Propulsion system sinks
-        if newPM == PointingMode.BURN_TRANSIT:
-            write_status(self.prop_idle_status_msg, False)
-            write_status(self.prop_heat_status_msg, True)
-            write_status(self.prop_thr_status_msg, False)
-        if oldPM == PointingMode.BURN_TRANSIT:
-            if newPM == PointingMode.BURN:
-                write_status(self.prop_idle_status_msg, False)
-                write_status(self.prop_heat_status_msg, False)
-                write_status(self.prop_thr_status_msg, True)
-            else: 
-                write_status(self.prop_idle_status_msg, True)
-                write_status(self.prop_heat_status_msg, False)
-                write_status(self.prop_thr_status_msg, False)
-        
-        if newPM == PointingMode.BURN:
-            write_status(self.prop_idle_status_msg, False)
-            write_status(self.prop_heat_status_msg, False)
-            write_status(self.prop_thr_status_msg, True)
-        if oldPM == PointingMode.BURN:
-            if newPM == PointingMode.BURN_TRANSIT:
-                write_status(self.prop_idle_status_msg, False)
-                write_status(self.prop_heat_status_msg, True)
-                write_status(self.prop_thr_status_msg, False)
-            else:
-                write_status(self.prop_idle_status_msg, True)
-                write_status(self.prop_heat_status_msg, False)
-                write_status(self.prop_thr_status_msg, False)
-
-        # Propulsion heater sink
-        if newPM == PointingMode.BURN_TRANSIT:
-            write_status(self.prop_heat_status_msg, True)
-        if oldPM == PointingMode.BURN_TRANSIT:
-            write_status(self.prop_heat_status_msg, False)
-
-        # Propulsion thrusting sink
-        if newPM == PointingMode.BURN:
-            write_status(self.prop_thr_status_msg, True)
-        if oldPM == PointingMode.BURN:
-            write_status(self.prop_thr_status_msg, False)
-
 
 
 
@@ -1053,7 +1050,87 @@ class FswStack():
 
     ##########################
     # Private helper methods #
-    ##########################    
+    ##########################  
+
+    def _evaluate_active_eps_components(
+        self,
+        oldPM: PointingMode,
+        newPM: PointingMode,
+        CurrentSimNanos: int,
+    ) -> None:
+        if self.com_status_msg is None:
+            raise RuntimeError("com_status_msg has not been initialized.")
+        if self.pay_status_msg is None:
+            raise RuntimeError("pay_status_msg has not been initialized.")
+        if self.prop_idle_status_msg is None:
+            raise RuntimeError("prop_idle_status_msg has not been initialized.")
+        if self.prop_heat_status_msg is None:
+            raise RuntimeError("prop_heat_status_msg has not been initialized.")
+        if self.prop_thr_status_msg is None:
+            raise RuntimeError("prop_thr_status_msg has not been initialized.")
+
+        def write_status(msg: messaging.DeviceStatusMsg, enabled: bool) -> None:
+            payload = messaging.DeviceStatusMsgPayload()
+            payload.deviceStatus = 1 if enabled else 0
+            msg.write(payload, CurrentSimNanos)
+
+        # Only change active components if there is an actual mode transition
+        if not oldPM == newPM:
+        
+            # Communication sink
+            if newPM == PointingMode.COMMS:
+                write_status(self.com_status_msg, True)
+            if oldPM == PointingMode.COMMS:
+                write_status(self.com_status_msg, False)
+
+            # Payload sink
+            if newPM == PointingMode.CAPTURE:
+                write_status(self.pay_status_msg, True)
+            if oldPM == PointingMode.CAPTURE:
+                write_status(self.pay_status_msg, False)
+
+            # Propulsion system sinks
+            if newPM == PointingMode.BURN_TRANSIT:
+                write_status(self.prop_idle_status_msg, False)
+                write_status(self.prop_heat_status_msg, True)
+                write_status(self.prop_thr_status_msg, False)
+            if oldPM == PointingMode.BURN_TRANSIT:
+                if newPM == PointingMode.BURN:
+                    write_status(self.prop_idle_status_msg, False)
+                    write_status(self.prop_heat_status_msg, False)
+                    write_status(self.prop_thr_status_msg, True)
+                else: 
+                    write_status(self.prop_idle_status_msg, True)
+                    write_status(self.prop_heat_status_msg, False)
+                    write_status(self.prop_thr_status_msg, False)
+            
+            if newPM == PointingMode.BURN:
+                write_status(self.prop_idle_status_msg, False)
+                write_status(self.prop_heat_status_msg, False)
+                write_status(self.prop_thr_status_msg, True)
+            if oldPM == PointingMode.BURN:
+                if newPM == PointingMode.BURN_TRANSIT:
+                    write_status(self.prop_idle_status_msg, False)
+                    write_status(self.prop_heat_status_msg, True)
+                    write_status(self.prop_thr_status_msg, False)
+                else:
+                    write_status(self.prop_idle_status_msg, True)
+                    write_status(self.prop_heat_status_msg, False)
+                    write_status(self.prop_thr_status_msg, False)
+
+            # Propulsion heater sink
+            if newPM == PointingMode.BURN_TRANSIT:
+                write_status(self.prop_heat_status_msg, True)
+            if oldPM == PointingMode.BURN_TRANSIT:
+                write_status(self.prop_heat_status_msg, False)
+
+            # Propulsion thrusting sink
+            if newPM == PointingMode.BURN:
+                write_status(self.prop_thr_status_msg, True)
+            if oldPM == PointingMode.BURN:
+                write_status(self.prop_thr_status_msg, False)
+
+
     
     def _limit_thrust_cmd_by_fuel(self, CurrentSimNanos: int) -> None:
         raw_cmd = self.form_ctrl.onTimeOutMsg.read()
@@ -1087,6 +1164,36 @@ class FswStack():
         self.form_ctrl.onTimeOutMsg.write(messaging.THRArrayOnTimeCmdMsgPayload())
     
 
+    def _formation_burn_requested(self) -> bool:
+        """
+        Return True if the formation controller is requesting a nonzero thruster burn.
+
+        This method treats the spacecraftReconfig module as the authority on whether
+        formation station-keeping requires thrust. If any requested thruster on-time
+        is larger than a small tolerance, the pointing mode should enter
+        BURN_TRANSIT or BURN.
+        """
+
+        # The leader should not perform formation-maintenance burns.
+        if (not self.formEnabled) or (self.sat_idx == 0):
+            return False
+
+        try:
+            thr_cmd = self.form_ctrl.onTimeOutMsg.read()
+        except Exception:
+            logging.debug(f"[{self.logTag}] Could not read formation-control thrust command.")
+            return False
+
+        on_time_request = np.array(thr_cmd.OnTimeRequest, dtype=float)
+
+        if on_time_request.size == 0:
+            return False
+
+        on_time_tol = 1e-9  # [s], numerical tolerance
+
+        return bool(np.any(on_time_request > on_time_tol))
+    
+    
     def _burn_attitude_reached(self) -> bool:
         """
         True if current attitude tracking error is small enough to safely fire thruster.
