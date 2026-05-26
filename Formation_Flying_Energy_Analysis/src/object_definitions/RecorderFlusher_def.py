@@ -344,69 +344,70 @@ class RecorderFlusher(sysModel.SysModel):
 
         return np.stack((R_hat_N, T_hat_N, N_hat_N), axis=1)
 
-    # def _append_sampled_data_group(
-    #     self,
-    #     h5: h5py.File,
-    #     group_name: str,
-    #     data: NDArray[Any],
-    #     dt_s: float,
-    # ) -> None:
-    #     if data.shape[0] == 0:
-    #         return
+    def _append_sampled_data_group(
+        self,
+        h5: h5py.File,
+        group_name: str,
+        data: NDArray[Any],
+        dt_s: float,
+    ) -> None:
+        if data.shape[0] == 0:
+            return
 
-    #     if data.ndim not in (1, 2):
-    #         raise ValueError(
-    #             f"Unsupported data dimension for '{group_name}'. "
-    #             f"Expected 1D or 2D, got shape {data.shape}."
-    #         )
+        if data.ndim not in (1, 2):
+            raise ValueError(
+                f"Unsupported data dimension for '{group_name}'. "
+                f"Expected 1D or 2D, got shape {data.shape}."
+            )
 
-    #     if group_name not in h5:
-    #         grp = h5.create_group(group_name)
+        if group_name not in h5:
+            grp = h5.create_group(group_name)
 
-    #         maxshape = (None,) if data.ndim == 1 else (None, data.shape[1])
-    #         chunk_shape = (
-    #             min(100_000, data.shape[0]),
-    #         ) if data.ndim == 1 else (
-    #             min(100_000, data.shape[0]),
-    #             data.shape[1],
-    #         )
+            maxshape = (None,) if data.ndim == 1 else (None, data.shape[1])
+            chunk_shape = (
+                min(100_000, data.shape[0]),
+            ) if data.ndim == 1 else (
+                min(100_000, data.shape[0]),
+                data.shape[1],
+            )
 
-    #         grp.create_dataset(
-    #             "data",
-    #             data=data,
-    #             maxshape=maxshape,
-    #             chunks=chunk_shape,
-    #             # compression="gzip", Turning compresison off for debugging
-    #             # compression_opts=4,
-    #             # shuffle=True,
-    #         )
-    #         grp.create_dataset("dt_s", data=float(dt_s))
-    #         grp.create_dataset("n_samples", data=int(data.shape[0]))
-    #         return
+            grp.create_dataset(
+                "data",
+                data=data,
+                maxshape=maxshape,
+                chunks=chunk_shape,
+                # compression="gzip", Turning compresison off for debugging
+                # compression_opts=4,
+                # shuffle=True,
+            )
+            grp.create_dataset("dt_s", data=float(dt_s))
+            grp.create_dataset("n_samples", data=int(data.shape[0]))
+            return
 
-    #     grp = h5[group_name]
-    #     dset = grp["data"]
+        grp = h5[group_name]
+        dset = grp["data"]
 
-    #     old_n = int(dset.shape[0])
-    #     new_n = old_n + int(data.shape[0])
+        old_n = int(dset.shape[0])
+        new_n = old_n + int(data.shape[0])
 
-    #     if dset.ndim != data.ndim:
-    #         raise ValueError(
-    #             f"Dimension mismatch for '{group_name}': "
-    #             f"existing {dset.shape}, new {data.shape}"
-    #         )
+        if dset.ndim != data.ndim:
+            raise ValueError(
+                f"Dimension mismatch for '{group_name}': "
+                f"existing {dset.shape}, new {data.shape}"
+            )
 
-    #     if data.ndim == 2 and dset.shape[1] != data.shape[1]:
-    #         raise ValueError(
-    #             f"Column mismatch for '{group_name}': "
-    #             f"existing {dset.shape}, new {data.shape}"
-    #         )
+        if data.ndim == 2 and dset.shape[1] != data.shape[1]:
+            raise ValueError(
+                f"Column mismatch for '{group_name}': "
+                f"existing {dset.shape}, new {data.shape}"
+            )
 
-    #     dset.resize((new_n,) if data.ndim == 1 else (new_n, data.shape[1]))
-    #     dset[old_n:new_n] = data
+        dset.resize((new_n,) if data.ndim == 1 else (new_n, data.shape[1]))
+        dset[old_n:new_n] = data
 
-    #     grp["dt_s"][...] = float(dt_s)
-    #     grp["n_samples"][...] = int(new_n)
+        grp["dt_s"][...] = float(dt_s)
+        grp["n_samples"][...] = int(new_n)
+         
 
     def _clear_spacecraft_recorders(self, bundle: SpacecraftRuntimeBundle) -> None:
         dyn = bundle.dynModel

@@ -1,7 +1,7 @@
 SATELLITES:
   leader:
-    init_att: [[0.21], [0.21], [0.21]]
-    init_angvel: [[0.21], [0.21], [0.21]]
+    deploy_vel: [-0.2, 0.0, 0.0]
+    init_angvel: [[0.0], [0.0], [0.0]]
   follower-1:
-    init_att: [[0.22], [0.22], [0.22]]
-    init_angvel: [[0.22], [0.22], [0.22]]  
+    deploy_vel: [0.2, 0.0, 0.0]
+    init_angvel: [[0.0], [0.0], [0.0]] 

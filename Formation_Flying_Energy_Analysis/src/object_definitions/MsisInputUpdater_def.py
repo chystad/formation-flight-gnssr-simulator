@@ -41,7 +41,7 @@ MSIS_SW_KEYS: list[str] = [
 @dataclass_json
 @dataclass
 class SpaceWeatherDay:
-    """One UTC day of space-weather data from Kp_ap_Ap_SN_F107_since_2010.txt."""
+    """One UTC day of space-weather data from space_weather_data.txt."""
     ap: list[int]        # 8x 3-hour ap values: [00-03, 03-06, ..., 21-24]
     Ap: int              # daily Ap
     f107obs: float       # adjusted F10.7

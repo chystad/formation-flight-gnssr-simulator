@@ -46,7 +46,6 @@ from constants import(
     ENV_RATE,
     DYN_RATE,
     FSW_RATE,
-    FORM_CTRL_RATE,
     MSIS_RATE,
     FLUSH_RATE,
 
@@ -142,7 +141,6 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         self.envRateNanos: int =    macros.sec2nano(ENV_RATE)
         self.dynRateNanos: int =    macros.sec2nano(DYN_RATE)
         self.fswRateNanos: int =    macros.sec2nano(FSW_RATE)
-        self.formCtrlRateNanos: int = macros.sec2nano(FORM_CTRL_RATE)
         self.msisRateNanos: int =   macros.sec2nano(MSIS_RATE)
         self.recorderFlusherRateNanos: int = macros.hour2nano(FLUSH_RATE)
 
@@ -259,10 +257,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
     def output_data(self) -> None:
         """
         Read the data from all recorders and output a single data file
-        """
-        logging.debug(F"[BSK] Writing output data to file has not yet been implemented...")        
-
-        
+        """ 
         
         # # Extract mission data from recorders
         # missionSimData: MissionSimData # TODO
@@ -288,10 +283,13 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             dataWriter.write_data_to_files()
             del dataWriter # free up buffer
 
-            plt.plot_all_formation_plots(scSimDataList)
+            plt_sat_idx = 1
+            # plt.plot_all_formation_plots(scSimDataList)
             plt.plot_all_thruster_fuel_plots(scSimDataList)
-            plt.plot_all_per_satellite_GNC_plots(scSimDataList, sat_idx=1)
+            # plt.plot_all_per_satellite_GNC_plots(scSimDataList, plt_sat_idx)
+            plt.plot_all_eps_plots(scSimDataList, plt_sat_idx, self.cfg.bat_storage_capacity)
             plt.mpl.show()
+            self.cfg.bat_storage_capacity
 
             # Release data
             del scSimDataList
@@ -384,10 +382,13 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             sun_eclipse_msg = dynModel.sun_eclipse_msg,
             sun_state_msg = self.envModel.spiceObj.planetStateOutMsgs[self.envModel.sun_idx], # TODO: Make attribute of env
             thr_config_array_msg = dynModel.thr_config_array_msg,
-            log_timestamp = self.cfg.timestamp_str
+            fuel_tank_msg = dynModel.fuel_tank_out_msg,
+            log_timestamp = self.cfg.timestamp_str,
+            DEBUG_sc_I = dynModel.scObj.hub.IHubPntBc_B
         )
         dynModel.connect_fsw_torque_cmd_to_rw_effector(fsw)
         dynModel.connect_fsw_thr_cmd_to_thr_effector(fsw)
+        dynModel.connect_fsw_eps_cmds_to_power_sinks(fsw)
 
         return fsw
 

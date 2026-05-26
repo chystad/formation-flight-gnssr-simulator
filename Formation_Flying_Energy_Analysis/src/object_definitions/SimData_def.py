@@ -65,6 +65,12 @@ class SpacecraftSimData:
     rwNetPower: Optional[SampledData] = None # (n, numRWs) [W] RW power used/generated ( < 0 => Consume power) (float32)
 
     obcNetPower: Optional[SampledData] = None        # (n,) [W] Net power used/generated (float32)
+    comNetPower: Optional[SampledData] = None        # (n,) [W] Comms net power used/generated (float32)
+    batHeatNetPower: Optional[SampledData] = None    # (n,) [W] Battery pack heater net power used/generated (float32)
+    payNetPower: Optional[SampledData] = None        # (n,) [W] Comms net power used/generated (float32)
+    propIdleNetPower: Optional[SampledData] = None   # (n,) [W] Propulsion system idle net power used/generated (float32)
+    propHeatNetPower: Optional[SampledData] = None   # (n,) [W] Propulsion heating net power used/generated (float32)
+    propThrNetPower: Optional[SampledData] = None    # (n,) [W] Propulsion system thrust net power used/generated (float32)
     solarPanelNetPower: Optional[SampledData] = None # (n, numSPs) [W] Net power used/generated (float32)
 
 @dataclass
@@ -268,6 +274,12 @@ class SimData:
 
             assert dynModel.thrusterStateRecorder is not None
             assert dynModel.obcPowerSinkRecorder is not None
+            assert dynModel.comPowerSinkRecorder is not None
+            assert dynModel.batHeatPowerSinkRecorder is not None
+            assert dynModel.payPowerSinkRecorder is not None
+            assert dynModel.propIdlePowerSinkRecorder is not None
+            assert dynModel.propHeatPowerSinkRecorder is not None
+            assert dynModel.propThrPowerSinkRecorder is not None
             assert len(dynModel.rwStateRecorders) == dynModel.numRWs
             assert len(dynModel.rwPowerRecorders) == dynModel.numRWs
             assert len(dynModel.solarPanelPowerRecorders) == dynModel.numSPs
@@ -318,6 +330,48 @@ class SimData:
                 len(dynModel.obcPowerSinkRecorder.netPower))
             dynModel.obcPowerSinkRecorder.clear()
 
+            # Communication system power sink
+            comNetPower_data = SampledData(
+                np.asarray(dynModel.comPowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.comPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.comPowerSinkRecorder.netPower))
+            dynModel.comPowerSinkRecorder.clear()
+
+            # Battery heater power sink
+            batHeatNetPower_data = SampledData(
+                np.asarray(dynModel.batHeatPowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.batHeatPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.batHeatPowerSinkRecorder.netPower))
+            dynModel.batHeatPowerSinkRecorder.clear()
+            
+            # Payload power sink
+            payNetPower_data = SampledData(
+                np.asarray(dynModel.payPowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.payPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.payPowerSinkRecorder.netPower))
+            dynModel.payPowerSinkRecorder.clear()
+
+            # Propolsion system idle power sink
+            propIdleNetPower_data = SampledData(
+                np.asarray(dynModel.propIdlePowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.propIdlePowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.propIdlePowerSinkRecorder.netPower))
+            dynModel.propIdlePowerSinkRecorder.clear()
+
+            # Propolsion system heating power sink
+            propHeatNetPower_data = SampledData(
+                np.asarray(dynModel.propHeatPowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.propHeatPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.propHeatPowerSinkRecorder.netPower))
+            dynModel.propHeatPowerSinkRecorder.clear()
+
+            # Propolsion system thrusting power sink
+            propThrNetPower_data = SampledData(
+                np.asarray(dynModel.propThrPowerSinkRecorder.netPower, dtype=np.float32),
+                dynModel.propThrPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+                len(dynModel.propThrPowerSinkRecorder.netPower))
+            dynModel.propThrPowerSinkRecorder.clear()
+
             # Solar panel power generation, one array per solar panel
             solarPanelNetPower_data = SampledData(
                 np.asarray([rec.netPower for rec in dynModel.solarPanelPowerRecorders], dtype=np.float32).T,
@@ -348,6 +402,12 @@ class SimData:
                 rwUCurrent=rwUCurrent_data,
                 rwNetPower=rwNetPower_data,
                 obcNetPower=obcNetPower_data,
+                comNetPower=comNetPower_data,
+                batHeatNetPower=batHeatNetPower_data,
+                payNetPower=payNetPower_data,
+                propIdleNetPower=propIdleNetPower_data,
+                propHeatNetPower=propHeatNetPower_data,
+                propThrNetPower=propThrNetPower_data,
                 solarPanelNetPower=solarPanelNetPower_data,
             )
             
@@ -571,6 +631,12 @@ class SimData:
         assert scSimData.rwUCurrent is not None
         assert scSimData.rwNetPower is not None
         assert scSimData.obcNetPower is not None
+        assert scSimData.comNetPower is not None
+        assert scSimData.batHeatNetPower is not None
+        assert scSimData.payNetPower is not None
+        assert scSimData.propIdleNetPower is not None
+        assert scSimData.propHeatNetPower is not None
+        assert scSimData.propThrNetPower is not None
         assert scSimData.solarPanelNetPower is not None
         assert scSimData.thrustForce_B is not None
         logging.debug(f"""
@@ -600,6 +666,12 @@ Dynamics-owned data:
   storageLevel:        {np.shape(scSimData.storageLevel.data)}
   currentNetPower:     {np.shape(scSimData.currentNetPower.data)}
   obcNetPower:         {np.shape(scSimData.obcNetPower.data)}
+  comNetPower:         {np.shape(scSimData.comNetPower.data)}
+  batHeatNetPower:     {np.shape(scSimData.batHeatNetPower.data)}
+  payNetPower:         {np.shape(scSimData.payNetPower.data)}
+  propIdleNetPower:    {np.shape(scSimData.propIdleNetPower.data)}
+  propHeatNetPower:    {np.shape(scSimData.propHeatNetPower.data)}
+  propThrNetPower:     {np.shape(scSimData.propThrNetPower.data)}
   solarPanelNetPower:  {np.shape(scSimData.solarPanelNetPower.data)}
 """)
         

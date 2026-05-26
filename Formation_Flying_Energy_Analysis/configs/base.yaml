@@ -1,7 +1,7 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 6 # [hours] 
+  simulationDuration: 8 # [hours] 2160=3mnd, 720=1mnd
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 2
@@ -18,47 +18,47 @@ SIMULATION:
 # Satellite parameters
 SATELLITES:
   leader:
-    m_s: 12.0      # [kg]  Satellite mass
+    m_s: 5.872      # [kg]  Satellite dry mass
     C_D: 2.2      # [-]   Drag coefficient
     A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
     C_R: 1.21     # [-]   Radiation pressure coefficient
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
-    I_B: [0.5, 0.,         0.,        
-          0.,         0.5, 0.,
-          0.,         0.,         0.5] # [kgm^2] Inertia of hub about point Bc in B frame components
+    I_B: [0.049221667, 0.,          0.,
+          0.,          0.024610833, 0.,
+          0.,          0.,          0.063988167] # [kgm^2] Inertia of hub about point Bc in B frame components
     r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
     r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
     deploy_vel: [0.0, 0.0, 0.0] # [m/s] Deployment velocity from shared deployer, expressed in N frame
     init_att: [[0.3], [0.2], [-0.2]]    # Orientation of Body relative to Inertial expressed using MRP
     init_angvel: [[0.0], [0.0], [0.0]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
-    m_s: 12.0
+    m_s: 5.872
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.5, 0.,         0.,        
-          0.,         0.5, 0.,
-          0.,         0.,         0.5]
+    I_B: [0.049221667, 0.,          0.,
+          0.,          0.024610833, 0.,
+          0.,          0.,          0.063988167]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
-    deploy_vel: [1.0, 0.0, 0.0]
+    deploy_vel: [0.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.0], [0.], [0.]] 
   follower-2:
-    m_s: 8.0
+    m_s: 5.872
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.1, 0.,         0.,        
-          0.,         0.1, 0.,
-          0.,         0.,         0.1]
+    I_B: [0.049221667, 0.,          0.,
+          0.,          0.024610833, 0.,
+          0.,          0.,          0.063988167]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
-    deploy_vel: [0.0, 1.0, 0.0]
+    deploy_vel: [0.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
-    init_angvel: [[0.1], [0.], [0.]] 
+    init_angvel: [[0.0], [0.], [0.]] 
   follower-3:
     m_s: 8.0
     C_D: 2.2
@@ -77,7 +77,7 @@ SATELLITES:
 # TODO
 FORMATION_CONTROL:
   form_enabled: true
-  form_type: "cat"  # ['cat': constant along track, 'cpo': circular projected orbit, 'cc': concentric]
+  form_type: "cc"  # ['cat': constant along track, 'cpo': circular projected orbit, 'cc': concentric]
   leader_mode: "leader_sat" # TODO Might remove to just be decided by 'form_type' "leader_sat" or "common_point"
   form_pos_tolerance: 25.0 # [m] TODO
   form_vel_tolerance: 0.02 # [m/s] TODO
@@ -110,23 +110,23 @@ GROUND_STATIONS:
 
 # Electrical Power System parameters (same for all satellites) 
 EPS_PARAMETERS:
-  bat_storage_capacity: 10.0   # [Wh] Battery max storage capacity
-  init_bat_charge: 0.8        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
-  RW_base_draw: 1.0           # [W] Idle/baseline power consumption for each RW (> 0)
+  bat_storage_capacity: 100.0   # [Wh] Battery max storage capacity
+  init_bat_charge: 1.0        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
+  RW_base_draw: 0.34           # [W] Idle/baseline power consumption for each RW (> 0)
   OBC_const_draw: 2.0         # [W] Constant OBC power consumption (> 0)
   solar_panels:
     p1:
       nHat_B: [0, 0, 1]     # Panel normal unit vec in body (B)
-      panel_area: 0.18      # [m^2] Panel area (> 0)
-      panel_efficiency: 0.2 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
+      panel_area: 0.06      # [m^2] Panel area (> 0)
+      panel_efficiency: 0.3 # [W/W] Panel efficiency in converting solar energy to electrical energy (0, 1)
     p2:
-      nHat_B: [0, 1, 0]
-      panel_area: 0.02
-      panel_efficiency: 0.2
+      nHat_B: [1, 0, 0]
+      panel_area: 0.03
+      panel_efficiency: 0.3
     p3:
-      nHat_B: [0, 0, -1]
-      panel_area: 0.06
-      panel_efficiency: 0.2
+      nHat_B: [-1, 0, 0]
+      panel_area: 0.03
+      panel_efficiency: 0.3
 
 # Reaction wheel parameters (same for all satellites)
 # From RWp100 and RWp015(https://www.bluecanyontech.com/wp-content/uploads/Reaction-Wheels-Full-Product-Line.pdf)
@@ -136,10 +136,10 @@ RW_PARAMETERS:
               [0., 1., 0.],   # (Then number of vectors also define the number of RWs)
               [0., 0., 1.],]
   init_rpm: 0.0               # [RPM] initial wheel speed
-  max_rpm: 6000.0             # [RPM] max wheel angular velocity
-  maxMomentum: 0.03            # [Nms] Maximum momentum storage capacity
-  maxTorque: 0.004            # [Nm] Maximum RW motor torque
-  minTorque: 0.00001          # [Nm] Minimum RW motor torque
+  max_rpm: 10000.0             # [RPM] max wheel angular velocity
+  maxMomentum: 0.027            # [Nms] Maximum momentum storage capacity
+  maxTorque: 0.007            # [Nm] Maximum RW motor torque
+  minTorque: 0.0000001          # [Nm] Minimum RW motor torque
   # I_RW: 1.                  # [kgm^2] RW inertia about spin axis (calculated from maxMomentum, max_rpm)
   useMinTorque: false
   useFriction: false
@@ -150,8 +150,8 @@ RW_PARAMETERS:
 
 # Thruster parameters (same for all satellites)
 THRUSTER_PARAMETERS:
-  thr_pos_B: [-1., 0., 0.] # [m] vector with thruster location in B-frame components
-  thr_dir_B: [1., 0., 0.] # [-] Unit vector with thruster force direction
+  thr_pos_B: [0., 0., 0.] # [m] vector with thruster location in B-frame components
+  thr_dir_B: [-1., 0., 0.] # [-] Unit vector with thruster force direction
 
   thr_model_override: "None" # ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
                              # [WARNING] Chosing any of the above values OVERRIDES the thruster params under.
@@ -159,9 +159,9 @@ THRUSTER_PARAMETERS:
 
   use_min_pulse_time: false   # [-] Flag if the thruster model should use a minimum impulse time
   min_pulse_time: 0.          # [s] Thruster minimum on time (Requires: use_min_pulse_time == true)
-  max_thrust: 0.1             # [N] Maximum thruster force
+  max_thrust: 1.100           # [N] Maximum thruster force
   thrust_blowdown_coeff: [1.] # [-] Vector with polynomial coefficients for fuel mass to thrust blow down model in descending order
-  steady_isp: 100.            # [s] Thruster specific impulse/fuel efficiency
+  steady_isp: 133.            # [s] Thruster specific impulse/fuel efficiency
   isp_blowdown_coeff: [1.]    # [-] Vector with polynomial coefficients for fuel mass to Isp blow down model in descending order
   area_nozzle: 0.02           # [m^2 ??] Thruster nozzle exhaust cone exit area
   thr_mag_disp: 0.           # [% ??] thruster dispersion percentage

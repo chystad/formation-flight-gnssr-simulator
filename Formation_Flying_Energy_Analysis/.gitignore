@@ -2,4 +2,5 @@ output_data/
 
 src/__pycache__
 src/object_definitions/__pycache__/
+src/plotting/__pycache__/
 src/ARCHIVE/

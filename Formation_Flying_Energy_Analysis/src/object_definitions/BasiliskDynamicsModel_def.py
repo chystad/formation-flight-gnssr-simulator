@@ -81,6 +81,12 @@ class BasiliskDynamicsModel:
             |---fuelTankEffector [20]
             |---battery [20]
             |---obcPowerSink [20]
+            |---batHeatPowerSink
+            |---comPowerSink
+            |---payPowerSink
+            |---propIdlePowerSink
+            |---propHeatPowerSink
+            |---propThrPowerSink
             |---rwPower(s) [20]
             |
             |---thrusterStateRecorder [10]
@@ -136,6 +142,12 @@ class BasiliskDynamicsModel:
         self.rwPowerList: list[ReactionWheelPower.ReactionWheelPower] = []
         self.battery: Optional[simpleBattery.SimpleBattery] = None
         self.obcPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.comPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.batHeatPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.payPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.propIdlePowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.propHeatPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
+        self.propThrPowerSink: Optional[simplePowerSink.SimplePowerSink] = None
 
 
         # Persistent message handles exposed to FSW
@@ -147,6 +159,7 @@ class BasiliskDynamicsModel:
         self.gs_access_msgs: list[messaging.AccessMsg] = []
         self.sun_eclipse_msg: Optional[messaging.EclipseMsg] = None
         self.thr_config_array_msg: Optional[messaging.THRArrayConfigMsg] = None
+        self.fuel_tank_out_msg: messaging.FuelTankMsg
 
         # Recorders owned by this class
         self.batteryStateRecorder: BasiliskRecorder    # Battery charge
@@ -155,6 +168,12 @@ class BasiliskDynamicsModel:
         self.rwStateRecorders: list[BasiliskRecorder] = []              # RW configs and speeds, per RW 
         self.rwPowerRecorders: list[BasiliskRecorder] = []              # RW power consumption, per RW
         self.obcPowerSinkRecorder: Optional[BasiliskRecorder] = None    # OBC power consumption
+        self.batHeatPowerSinkRecorder: Optional[BasiliskRecorder] = None
+        self.payPowerSinkRecorder: Optional[BasiliskRecorder] = None
+        self.propIdlePowerSinkRecorder: Optional[BasiliskRecorder] = None
+        self.propHeatPowerSinkRecorder: Optional[BasiliskRecorder] = None
+        self.propThrPowerSinkRecorder: Optional[BasiliskRecorder] = None
+        self.comPowerSinkRecorder: Optional[BasiliskRecorder] = None    # Toggleable Comms antenna power consumption
         self.solarPanelPowerRecorders: list[BasiliskRecorder] = []      # Solar panel power generation, per panel
         self.rwSpeedRecorder: Optional[BasiliskRecorder] = None         # (minimal replacement for rwStateRecorders) RW speeds
         
@@ -190,6 +209,12 @@ class BasiliskDynamicsModel:
         sim.AddModelToTask(self.dynTaskName, self.fuelTankEffector, 20)
         sim.AddModelToTask(self.dynTaskName, self.battery, 20)
         sim.AddModelToTask(self.dynTaskName, self.obcPowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.batHeatPowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.comPowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.payPowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.propIdlePowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.propHeatPowerSink, 20)
+        sim.AddModelToTask(self.dynTaskName, self.propThrPowerSink, 20)
         for rwPower in self.rwPowerList:
             sim.AddModelToTask(self.dynTaskName, rwPower, 20)
 
@@ -202,6 +227,12 @@ class BasiliskDynamicsModel:
                 sim.AddModelToTask(self.dynTaskName, self.rwStateRecorders[i], 10)
                 sim.AddModelToTask(self.dynTaskName, self.rwPowerRecorders[i], 10)
             sim.AddModelToTask(self.dynTaskName, self.obcPowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.batHeatPowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.comPowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.payPowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.propIdlePowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.propHeatPowerSinkRecorder, 10)
+            sim.AddModelToTask(self.dynTaskName, self.propThrPowerSinkRecorder, 10)
             for i in range(self.numSPs):
                 sim.AddModelToTask(self.dynTaskName, self.solarPanelPowerRecorders[i], 10)
             # sim.AddModelToTask(self.dynTaskName, self.rwSpeedRecorder, 10)  
@@ -230,9 +261,43 @@ class BasiliskDynamicsModel:
         """
 
         assert self.thrusterEffector is not None
-        self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.form_ctrl.onTimeOutMsg)
+        self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.form_ctrl.onTimeOutMsg) # Will burn fuel when the tank is empty
+        # self.thrusterEffector.cmdsInMsg.subscribeTo(fsw.fuelSafeThrCmdOutMsg)
+
 
         logging.debug(f"[DYN{self.sat_idx}] thruster subscribed to FSW thr cmd")
+
+
+
+    def connect_fsw_eps_cmds_to_power_sinks(self, fsw: FswStack) -> None:
+        """
+        Connect FSW EPS status command messages to switchable dynamics-side power sinks.
+        """
+
+        assert self.comPowerSink is not None
+        assert self.payPowerSink is not None
+        assert self.propIdlePowerSink is not None
+        assert self.propHeatPowerSink is not None
+        assert self.propThrPowerSink is not None
+
+        if fsw.com_status_msg is None:
+            raise RuntimeError(f"[{self.logTag}] fsw.com_status_msg is not initialized.")
+        if fsw.pay_status_msg is None:
+            raise RuntimeError(f"[{self.logTag}] fsw.pay_status_msg is not initialized.")
+        if fsw.prop_idle_status_msg is None:
+            raise RuntimeError(f"[{self.logTag}] fsw.prop_idle_status_msg is not initialized.")
+        if fsw.prop_heat_status_msg is None:
+            raise RuntimeError(f"[{self.logTag}] fsw.prop_heat_status_msg is not initialized.")
+        if fsw.prop_thr_status_msg is None:
+            raise RuntimeError(f"[{self.logTag}] fsw.prop_thr_status_msg is not initialized.")
+
+        self.comPowerSink.nodeStatusInMsg.subscribeTo(fsw.com_status_msg)
+        self.payPowerSink.nodeStatusInMsg.subscribeTo(fsw.pay_status_msg)
+        self.propIdlePowerSink.nodeStatusInMsg.subscribeTo(fsw.prop_idle_status_msg)
+        self.propHeatPowerSink.nodeStatusInMsg.subscribeTo(fsw.prop_heat_status_msg)
+        self.propThrPowerSink.nodeStatusInMsg.subscribeTo(fsw.prop_thr_status_msg)
+
+        logging.debug(f"[{self.logTag}] All variable EPS components subscribed to their respective status messages")
 
 
 
@@ -260,25 +325,9 @@ class BasiliskDynamicsModel:
         deployVel = self.sat.deployment_vel
         mu = self.envModel.gravFactory.gravBodies["earth"].mu
 
-        ############### DEBUG
-        oe = orbitalMotion.ClassicElements()
-        oe.a = 1.4*6371000  # meters
-        oe.e = 0.0
-        oe.i = 45.0 * macros.D2R
-        oe.Omega = 48.2 * macros.D2R
-        oe.omega = 347.8 * macros.D2R
-        oe.f = 85.3 * macros.D2R
-
-        if self.sat_idx == 1:
-            oe.f *= 1.001
-        if self.sat_idx == 2:
-            oe.f *= 0.999
-
-        #######################
-
         # Convert OEs to initial states and add the deployment velocity
         rN, vN = orbitalMotion.elem2rv(mu, oe)
-        # vN += deployVel 
+        vN += deployVel 
  
         # Set the initial conditions for the spacecraft object
         self.scObj.hub.r_CN_NInit = rN  # [m]   r_BN_N
@@ -527,8 +576,32 @@ class BasiliskDynamicsModel:
                 )
             RWs.append(RW)
 
-        if len(RWs) != self.numRWs:
-            raise ValueError(f"[{self.logTag}] The number of initalized RWs ({len(RWs)}) is not the same as its own attribute self.numRWs ({self.numRWs})")
+        ############################## Copied for testing from example scenario
+        # import numpy as np
+        # from Basilisk.utilities import RigidBodyKinematics as rbk
+        # # specify RW momentum capacity
+        # maxRWMomentum = 50.  # Nms
+
+        # # Define orthogonal RW pyramid
+        # # -- Pointing directions
+        # rwElAngle = np.array([40.0, 40.0, 40.0, 40.0]) * macros.D2R
+        # rwAzimuthAngle = np.array([45.0, 135.0, 225.0, 315.0]) * macros.D2R
+        # rwPosVector = [[0.8, 0.8, 1.79070],
+        #             [0.8, -0.8, 1.79070],
+        #             [-0.8, -0.8, 1.79070],
+        #             [-0.8, 0.8, 1.79070]]
+
+        # for elAngle, azAngle, posVector in zip(rwElAngle, rwAzimuthAngle, rwPosVector):
+        #     gsHat = (rbk.Mi(-azAngle, 3).dot(rbk.Mi(elAngle, 2))).dot(np.array([1, 0, 0]))
+        #     RW = rwFactory.create('Honeywell_HR16',
+        #                         gsHat,
+        #                         maxMomentum=maxRWMomentum,
+        #                         rWB_B=posVector)
+        #     RWs.append(RW)
+        ####################################################
+
+        # if len(RWs) != self.numRWs:
+        #     raise ValueError(f"[{self.logTag}] The number of initalized RWs ({len(RWs)}) is not the same as its own attribute self.numRWs ({self.numRWs})")
 
         # Create RW effector and attach to the spacecraft 
         rwEffector = reactionWheelStateEffector.ReactionWheelStateEffector()
@@ -579,11 +652,11 @@ class BasiliskDynamicsModel:
                 useMinPulseTime = self.cfg.use_min_pulse_time,
                 MinOnTime = self.cfg.min_pulse_time,
                 MaxThrust = self.cfg.max_thrust,
-                thrBlowDownCoeff = self.cfg.thrust_blowdown_coeff,
+                # thrBlowDownCoeff = self.cfg.thrust_blowdown_coeff,
                 steadyIsp = self.cfg.steady_isp,
-                ispBlowDownCoeff = self.cfg.isp_blowdown_coeff,
-                areaNozzle = self.cfg.area_nozzle,
-                thrusterMagDisp = self.cfg.thr_mag_disp
+                # ispBlowDownCoeff = self.cfg.isp_blowdown_coeff,
+                # areaNozzle = self.cfg.area_nozzle,
+                # thrusterMagDisp = self.cfg.thr_mag_disp
             )
 
         # Attach thruster set to spacecraft
@@ -622,20 +695,21 @@ class BasiliskDynamicsModel:
         fuelTankEffector.ModelTag = f"{self.scObj.ModelTag}_fuelEff"
         
         fuelTankEffector.setTankModel(fuelTankModel)
-        fuelTankModel.maxFuelMass = self.scObj.hub.mHub * 0.1 # [kg] fraction of the total satellite mass
-        fuelTankModel.propMassInit = fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
+        fuelTankModel.maxFuelMass = 0.635 # self.scObj.hub.mHub * 0.1 # [kg] fraction of the total satellite mass
+        fuelTankModel.propMassInit = 0.635 # fuelTankModel.maxFuelMass * 1.0 # Fraction of max mass
         fuelTankModel.r_TcT_TInit = [[0.0], [0.0], [0.0]]
         fuelTankEffector.r_TB_B = [[0.0], [0.0], [0.0]]
-        fuelTankModel.radiusTankInit = 1 # 0.05 # [m] The tank kan only have 1/2 side length radius for a 6U sat
-        fuelTankModel.lengthTank = 1 #0.2 # [m] The tank occupies ~2U of the satellite with V = 2pi x 0.05m x 0.2m
+        fuelTankModel.radiusTankInit = 0.05 # [m] The tank kan only have 1/2 side length radius for a 6U sat
+        fuelTankModel.lengthTank = 0.2 # [m] The tank occupies ~2U of the satellite with V = 2pi x 0.05m x 0.2m
         
         # Add the tank and connect the thrusters
-        self.scObj.addStateEffector(fuelTankEffector)
+        self.scObj.addStateEffector(fuelTankEffector) # JUST FOR DEBUG
         fuelTankEffector.addThrusterSet(self.thrusterEffector)
 
         # Assign attributes
         self.fuelTankModel = fuelTankModel
         self.fuelTankEffector = fuelTankEffector
+        self.fuel_tank_out_msg = fuelTankEffector.fuelTankOutMsg
 
         logging.debug(f"[{self.logTag}] Fuel tank initialized for '{self.scObj.ModelTag}'")
 
@@ -681,6 +755,37 @@ class BasiliskDynamicsModel:
         obcPowerSink = simplePowerSink.SimplePowerSink()
         obcPowerSink.ModelTag = f"{self.scObj.ModelTag}_OBCPower"
         obcPowerSink.nodePowerOut = -1 * self.cfg.OBC_const_draw  # [W]
+
+        # Constant power consumption from 2 battery pack heaters
+        batHeatPowerSink = simplePowerSink.SimplePowerSink()
+        batHeatPowerSink.ModelTag = f"{self.scObj.ModelTag}_batHeatPower"
+        batHeatPowerSink.nodePowerOut = -1 * 3.0  # [W] (from 1 battery packs, 1/2 heater consumption)
+
+        # On/off Communication system sink
+        comPowerSink = simplePowerSink.SimplePowerSink()
+        comPowerSink.ModelTag = f"{self.scObj.ModelTag}_ComPower"
+        comPowerSink.nodePowerOut = -1 * 4.0  # [W] 
+
+        # On/off Payload system sink
+        payPowerSink = simplePowerSink.SimplePowerSink()
+        payPowerSink.ModelTag = f"{self.scObj.ModelTag}_PayPower"
+        payPowerSink.nodePowerOut = -1 * 6.0  # [W]
+
+        # On/off Propulsion system idle sink
+        propIdlePowerSink = simplePowerSink.SimplePowerSink()
+        propIdlePowerSink.ModelTag = f"{self.scObj.ModelTag}_PropIdlePower"
+        propIdlePowerSink.nodePowerOut = -1 * 1.0  # [W] 
+
+        # On/off Propulsion heating sink
+        propHeatPowerSink = simplePowerSink.SimplePowerSink()
+        propHeatPowerSink.ModelTag = f"{self.scObj.ModelTag}_PropHeatPower"
+        propHeatPowerSink.nodePowerOut = -1 * 20.0  # [W] 
+        
+        # On/off Propulsion system thrusting
+        propThrPowerSink = simplePowerSink.SimplePowerSink()
+        propThrPowerSink.ModelTag = f"{self.scObj.ModelTag}_PropThrPower"
+        propThrPowerSink.nodePowerOut = -1 * 4.3 
+        
         
         # Add all power sources/consumers to battery
         for sp in self.solarPanels:
@@ -688,13 +793,25 @@ class BasiliskDynamicsModel:
 
         for rwPow in rwPowerList:
             battery.addPowerNodeToModel(rwPow.nodePowerOutMsg)
-        
+
         battery.addPowerNodeToModel(obcPowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(batHeatPowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(comPowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(payPowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(propIdlePowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(propHeatPowerSink.nodePowerOutMsg)
+        battery.addPowerNodeToModel(propThrPowerSink.nodePowerOutMsg)
         
         # Assign attributes
         self.battery = battery
         self.rwPowerList = rwPowerList
         self.obcPowerSink = obcPowerSink
+        self.batHeatPowerSink = batHeatPowerSink
+        self.comPowerSink = comPowerSink
+        self.payPowerSink = payPowerSink
+        self.propIdlePowerSink = propIdlePowerSink
+        self.propHeatPowerSink = propHeatPowerSink
+        self.propThrPowerSink = propThrPowerSink
         self.bat_state_msg = battery.batPowerOutMsg
 
         logging.debug(f"[{self.logTag}] EPS initialized for '{self.scObj.ModelTag}'")         
@@ -749,10 +866,11 @@ class BasiliskDynamicsModel:
         fuelTankStateRate = highSampleRateNanos
         thrusterStateRate = highSampleRateNanos
         rwStateRate = highSampleRateNanos
-        rwPowerRate = highSampleRateNanos
-        obcPowerSinkRate = midSampleRateNanos
-        solarPanelPowerRate = midSampleRateNanos
-        rwSpeedRate = highSampleRateNanos
+        sharedPowerRate = midSampleRateNanos
+        # rwPowerRate = highSampleRateNanos
+        # obcPowerSinkRate = midSampleRateNanos
+        # solarPanelPowerRate = midSampleRateNanos
+        # rwSpeedRate = highSampleRateNanos
         
         # Verify that rates are exact multiples of dynRate
         if lowSampleRateNanos % self.sim.dynRateNanos != 0.0:
@@ -775,11 +893,18 @@ class BasiliskDynamicsModel:
         assert self.rwEffector is not None
         assert self.battery is not None
         assert self.obcPowerSink is not None
+        assert self.comPowerSink is not None
+        assert self.batHeatPowerSink is not None
+        assert self.payPowerSink is not None
+        assert self.propIdlePowerSink is not None
+        assert self.propHeatPowerSink is not None
+        assert self.propThrPowerSink is not None
         assert self.rwFactory is not None
 
         # Mandatory recorders (battery + fuel tank)
         self.batteryStateRecorder = self.battery.batPowerOutMsg.recorder(batteryStateRate) # storageLevel [Ws] + currentNetPower [W]
         self.batteryStateRecorder_RateNanos = batteryStateRate
+        
         self.fuelTankStateRecorder = self.fuelTankEffector.fuelTankOutMsg.recorder(fuelTankStateRate) # attribute: fuelMass [kg]
         self.fuelTankStateRecorder_RateNanos = fuelTankStateRate
 
@@ -792,19 +917,37 @@ class BasiliskDynamicsModel:
             # RW power recorders
             for i in range(self.numRWs):
                 rwStateRec = self.rwEffector.rwOutMsgs[i].recorder(rwStateRate) # Omega [rad/s] + u_current [Nm]
-                rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(rwPowerRate) # netPower [W]
+                rwPowRec = self.rwPowerList[i].nodePowerOutMsg.recorder(sharedPowerRate) # netPower [W]
                 self.rwStateRecorders.append(rwStateRec)
                 self.rwPowerRecorders.append(rwPowRec)
             self.rwStateRecorder_RateNanos = rwStateRate
-            self.rwPowerRecorder_RateNanos = rwPowerRate
+            self.rwPowerRecorder_RateNanos = sharedPowerRate
 
             # Other Power modules recorders
-            self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(obcPowerSinkRate) # netPower [W]
-            self.obcPowerSinkRecorder_RateNanos = obcPowerSinkRate
+            self.obcPowerSinkRecorder = self.obcPowerSink.nodePowerOutMsg.recorder(sharedPowerRate) # netPower [W]
+            self.obcPowerSinkRecorder_RateNanos = sharedPowerRate
+            
+            self.comPowerSinkRecorder = self.comPowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.comPowerSinkRecorder_RateNanos = sharedPowerRate
+            
+            self.batHeatPowerSinkRecorder = self.batHeatPowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.batHeatPowerSinkRecorder_RateNanos = sharedPowerRate
+
+            self.payPowerSinkRecorder = self.payPowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.payPowerSinkRecorder_RateNanos = sharedPowerRate
+
+            self.propIdlePowerSinkRecorder = self.propIdlePowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.propIdlePowerSinkRecorder_RateNanos = sharedPowerRate
+
+            self.propHeatPowerSinkRecorder = self.propHeatPowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.propHeatPowerSinkRecorder_RateNanos = sharedPowerRate
+
+            self.propThrPowerSinkRecorder = self.propThrPowerSink.nodePowerOutMsg.recorder(sharedPowerRate)
+            self.propThrPowerSinkRecorder_RateNanos = sharedPowerRate
             for i in range(self.numSPs):
-                spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(solarPanelPowerRate) # netPower [W]
+                spPowRec = self.solarPanels[i].nodePowerOutMsg.recorder(sharedPowerRate) # netPower [W]
                 self.solarPanelPowerRecorders.append(spPowRec)
-            self.solarPanelPowerRecorder_RateNanos = solarPanelPowerRate
+            self.solarPanelPowerRecorder_RateNanos = sharedPowerRate
 
             # RW speed recorder (use instead of rwStateRecorders if only RW speeds are necessary)
             # self.rwSpeedRecorder = self.rwEffector.rwSpeedOutMsg.recorder(rwSpeedRate) # wheelSpeeds [rot/s OR rad/s, not sure] per wheel

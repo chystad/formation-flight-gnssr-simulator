@@ -31,8 +31,8 @@ LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 BURN_ATT_TOLERANCE: float = 0.01 # MRP norm
 BURN_RATE_TOLERANCE: float = 0.01 # rate norm
 
-MRP_K: float = 0.001 # MRP pointing controller: Gain on MRP attitude error 
-MRP_P: float = 0.02 # MRP pointing controller: Gain on Rate error
+MRP_K: float = 0.05 # MRP pointing controller: Gain on MRP attitude error 
+MRP_P: float = 0.035 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
 SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
 SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state (0, 1)
@@ -126,7 +126,9 @@ class FswStack():
         sun_eclipse_msg: messaging.EclipseMsg,
         sun_state_msg: messaging.SpicePlanetStateMsg,
         thr_config_array_msg: messaging.THRArrayConfigMsg,
+        fuel_tank_msg: messaging.FuelTankMsg,
         log_timestamp: str,
+        DEBUG_sc_I : Any,
     ):
         self.scheduler = _FswStackScheduler(self, sat_idx)
         self.sim = sim
@@ -143,11 +145,14 @@ class FswStack():
         self.sunEclipseMsg = sun_eclipse_msg
         self.sunStateMsg = sun_state_msg
         self.thrConfigArrayMsg = thr_config_array_msg
+        self.fuelTankMsg = fuel_tank_msg
         self.logTimestamp = log_timestamp
         self.lastCommsNanos = 0
         self.ModelTag = f"RwFswStack{sat_idx}"
         self.logTag = f"FSW{sat_idx}"
         self.pointingMode = PointingMode.COAST
+
+        self.DEBUG_sc_I = DEBUG_sc_I
 
         self.it = 0
 
@@ -159,6 +164,11 @@ class FswStack():
         # Message definition
         self.attRefMsg = None
         self.attGuidMsg = None
+        self.com_status_msg: Optional[messaging.DeviceStatusMsg] = None
+        self.pay_status_msg: Optional[messaging.DeviceStatusMsg] = None
+        self.prop_idle_status_msg: Optional[messaging.DeviceStatusMsg] = None
+        self.prop_heat_status_msg: Optional[messaging.DeviceStatusMsg] = None
+        self.prop_thr_status_msg: Optional[messaging.DeviceStatusMsg] = None
         
         # Read burn attitude and thrust request from FormationControlStack
         self.formAttRefInMsg: Optional[messaging.AttRefMsg] = None
@@ -166,9 +176,11 @@ class FswStack():
 
         # Initialize output thruster command
         self.thrOnTimeCmdOutMsg = messaging.THRArrayOnTimeCmdMsg()
-        thr_payload = messaging.THRArrayOnTimeCmdMsgPayload()
-        thr_payload.OnTimeRequest = [0.0]
-        self.thrOnTimeCmdOutMsg.write(thr_payload)
+        self.fuelSafeThrCmdOutMsg = messaging.THRArrayOnTimeCmdMsg() # 'Safe' to respect fuel limitations
+        init_thr_payload = messaging.THRArrayOnTimeCmdMsgPayload()
+        init_thr_payload.OnTimeRequest = [0.0]
+        self.thrOnTimeCmdOutMsg.write(init_thr_payload)
+        self.fuelSafeThrCmdOutMsg.write(init_thr_payload)
 
         # Recorders owned by this class
         self.navTransRecorder: BasiliskRecorder          # Position, velocity
@@ -222,10 +234,21 @@ class FswStack():
         if self.ctrl.Ki > 0:
             self.ctrl.integralLimit = 2.0 / self.ctrl.Ki * 0.1
 
+        ############### From example scenario 
+        # self.decayTime = 50
+        # self.xi = 0.9
+        # self.ctrl.Ki = -1  # make value negative to turn off integral feedback
+        # self.ctrl.P = 2 * np.max(DEBUG_sc_I) / self.decayTime
+        # self.ctrl.K = (self.ctrl.P / self.xi) * \
+        #                             (self.ctrl.P / self.xi) / np.max(
+        #     DEBUG_sc_I)
+        ############################
+
         # Setup models with correct parameters
         self._setup_gateway_msgs()
         self._setup_formation_control()
         self._setup_desired_OE_difference()
+        self._setup_eps_components()
         self._setup_fsw_recorders()
 
         # Message wiring
@@ -284,6 +307,7 @@ class FswStack():
         self._guidance(CurrentSimNanos)
         self.guid.UpdateState(CurrentSimNanos)
         self.form_ctrl.UpdateState(CurrentSimNanos)
+        # self._limit_thrust_cmd_by_fuel(CurrentSimNanos)
         self.att_err.UpdateState(CurrentSimNanos)
         self.ctrl.UpdateState(CurrentSimNanos)
         self.rw_map.UpdateState(CurrentSimNanos)
@@ -624,6 +648,10 @@ class FswStack():
             nextMode = PointingMode.ERROR
 
         self.pointingMode = nextMode
+
+        ########################### DEBUG ###########################
+        # self.pointingMode = PointingMode.COAST
+        #############################################################
         
         # Create log entry if pointing mode changes
         if old_pointing_mode != self.pointingMode:
@@ -632,6 +660,7 @@ class FswStack():
                 self.lastCommsNanos = CurrentSimNanos
                 hoursSinceLastComms = 0.
 
+            self._evaluate_active_eps_components(old_pointing_mode, self.pointingMode, CurrentSimNanos)
 
             # Temp:
             # req = self.formThrCmdInMsg.read() # type: ignore
@@ -730,10 +759,11 @@ class FswStack():
                 raise ValueError("")
             
 
+
+
     ################################
     # Private setup helper methods #
     ################################
-
 
     def _setup_formation_control(self) -> None:
         """
@@ -745,7 +775,7 @@ class FswStack():
         self.form_ctrl.thrustConfigInMsg.subscribeTo(self.thrConfigArrayMsg)
         self.form_ctrl.vehicleConfigInMsg.subscribeTo(self.massVehicleConfigOutMsg)
         self.form_ctrl.mu = self.sim.envModel.gravFactory.gravBodies["earth"].mu 
-        self.form_ctrl.attControlTime = 400  # [s]
+        self.form_ctrl.attControlTime = 15  # [s]
 
         # connect a blank chief message
         chiefData = messaging.NavTransMsgPayload()
@@ -769,13 +799,18 @@ class FswStack():
 
             desiredSeparation = self.sim.cfg.cat_const_separation
 
+            # Set up the station keeping requirements
+            rho = 1000.0                 # [m]
+            a_ref = 6878137.0            # [m], approximate 500 km Earth orbit
+            eps = rho / a_ref            # 1.4539e-4
+
             # TODO: Calculate the desired OED to get the desired separation given circular cheif orbit
 
             if self.sat_idx == 1:
-                self.form_ctrl.targetClassicOED = [0.0000, 0.000, 0.0000, 0.0000, 0.0000, -0.003]
+                self.form_ctrl.targetClassicOED = [0.0000, eps, eps, 0.0000, 0.0000, -0.003]
 
             if self.sat_idx == 2:
-                self.form_ctrl.targetClassicOED = [0.0000, 0.000, 0.000, 0.0000, 0.0000, 0.003]
+                self.form_ctrl.targetClassicOED = [0.0000, 2*eps, 2*eps, 0.0000, 0.0000, 0.003]
             
             # self.form_ctrl.targetClassicOED = [
             #     0.0, # da/a
@@ -785,10 +820,40 @@ class FswStack():
             #     0.0, # domega
             #     -0.01*self.sat_idx] # dM
 
+        elif self.sim.cfg.form_type == "cc":
+
+            # Set up the station keeping requirements
+            rho = 1000.0                 # [m]
+            a_ref = 6878137.0            # [m], approximate 500 km Earth orbit
+            eps = rho / a_ref            # 1.4539e-4
+
+            if self.sat_idx == 1:
+                self.form_ctrl.targetClassicOED = [
+                    0., 
+                    eps, 
+                    eps, 
+                    0., 
+                    0., 
+                    0.
+                ]
+
+            if self.sat_idx == 2:
+                self.form_ctrl.targetClassicOED = [
+                    0., 
+                    2*eps, 
+                    2*eps, 
+                    0., 
+                    0., 
+                    0.
+                ]
+
+            if self.sat_idx > 2:
+                raise ValueError(f"Desired orbital element difference has not been implemented for more than 2 follower spacecraft")
+
+
         else: 
             raise ValueError(f"Formation types other than 'constant along-track separation has not yet been implemented")
         
-
 
     def _setup_gateway_msgs(self):
         """
@@ -814,6 +879,107 @@ class FswStack():
         # Connected in dynModel's public methods
         # self.dynModel.rwEffector.rwMotorCmdInMsg.subscribeTo(self.rw_map.rwMotorTorqueOutMsg)
         # self.dynModel.thrusterEffector.cmdsInMsg.subscribeTo(self.form_ctrl.onTimeOutMsg)
+
+
+    
+    def _setup_eps_components(self) -> None:
+        """
+        Create persistent status command messages for switchable EPS loads.
+
+        The eps modules are initialized OFF. The dynamics-side
+        components subscribes to this message.
+        """
+        def _new_device_status_msg(status: int) -> messaging.DeviceStatusMsg:
+            payload = messaging.DeviceStatusMsgPayload()
+            payload.deviceStatus = status
+            return messaging.DeviceStatusMsg().write(payload)
+        
+        self.com_status_msg = _new_device_status_msg(0)
+        self.pay_status_msg = _new_device_status_msg(0)
+        self.prop_idle_status_msg = _new_device_status_msg(1)
+        self.prop_heat_status_msg = _new_device_status_msg(0)
+        self.prop_thr_status_msg = _new_device_status_msg(0)
+        
+
+        logging.debug(f"[{self.logTag}] EPS component status messages initialized")
+
+
+    def _evaluate_active_eps_components(
+        self,
+        oldPM: PointingMode,
+        newPM: PointingMode,
+        CurrentSimNanos: int,
+    ) -> None:
+        if self.com_status_msg is None:
+            raise RuntimeError("com_status_msg has not been initialized.")
+        if self.pay_status_msg is None:
+            raise RuntimeError("pay_status_msg has not been initialized.")
+        if self.prop_idle_status_msg is None:
+            raise RuntimeError("prop_idle_status_msg has not been initialized.")
+        if self.prop_heat_status_msg is None:
+            raise RuntimeError("prop_heat_status_msg has not been initialized.")
+        if self.prop_thr_status_msg is None:
+            raise RuntimeError("prop_thr_status_msg has not been initialized.")
+
+        def write_status(msg: messaging.DeviceStatusMsg, enabled: bool) -> None:
+            payload = messaging.DeviceStatusMsgPayload()
+            payload.deviceStatus = 1 if enabled else 0
+            msg.write(payload, CurrentSimNanos)
+
+        # Communication sink
+        if newPM == PointingMode.COMMS:
+            write_status(self.com_status_msg, True)
+        if oldPM == PointingMode.COMMS:
+            write_status(self.com_status_msg, False)
+
+        # Payload sink
+        if newPM == PointingMode.CAPTURE:
+            write_status(self.pay_status_msg, True)
+        if oldPM == PointingMode.CAPTURE:
+            write_status(self.pay_status_msg, False)
+
+        # Propulsion system sinks
+        if newPM == PointingMode.BURN_TRANSIT:
+            write_status(self.prop_idle_status_msg, False)
+            write_status(self.prop_heat_status_msg, True)
+            write_status(self.prop_thr_status_msg, False)
+        if oldPM == PointingMode.BURN_TRANSIT:
+            if newPM == PointingMode.BURN:
+                write_status(self.prop_idle_status_msg, False)
+                write_status(self.prop_heat_status_msg, False)
+                write_status(self.prop_thr_status_msg, True)
+            else: 
+                write_status(self.prop_idle_status_msg, True)
+                write_status(self.prop_heat_status_msg, False)
+                write_status(self.prop_thr_status_msg, False)
+        
+        if newPM == PointingMode.BURN:
+            write_status(self.prop_idle_status_msg, False)
+            write_status(self.prop_heat_status_msg, False)
+            write_status(self.prop_thr_status_msg, True)
+        if oldPM == PointingMode.BURN:
+            if newPM == PointingMode.BURN_TRANSIT:
+                write_status(self.prop_idle_status_msg, False)
+                write_status(self.prop_heat_status_msg, True)
+                write_status(self.prop_thr_status_msg, False)
+            else:
+                write_status(self.prop_idle_status_msg, True)
+                write_status(self.prop_heat_status_msg, False)
+                write_status(self.prop_thr_status_msg, False)
+
+        # Propulsion heater sink
+        if newPM == PointingMode.BURN_TRANSIT:
+            write_status(self.prop_heat_status_msg, True)
+        if oldPM == PointingMode.BURN_TRANSIT:
+            write_status(self.prop_heat_status_msg, False)
+
+        # Propulsion thrusting sink
+        if newPM == PointingMode.BURN:
+            write_status(self.prop_thr_status_msg, True)
+        if oldPM == PointingMode.BURN:
+            write_status(self.prop_thr_status_msg, False)
+
+
 
 
     def _setup_fsw_recorders(self):
@@ -885,14 +1051,29 @@ class FswStack():
         
         
 
-    
-
-
-
-
     ##########################
     # Private helper methods #
     ##########################    
+    
+    def _limit_thrust_cmd_by_fuel(self, CurrentSimNanos: int) -> None:
+        raw_cmd = self.form_ctrl.onTimeOutMsg.read()
+        fuel = self.fuelTankMsg.read()
+
+        remaining_fuel = max(float(fuel.fuelMass), 0.0)
+        reserve = 1e-6
+
+        payload = messaging.THRArrayOnTimeCmdMsgPayload()
+
+        logging.debug(f"[{self.logTag}] Remaining fuel @t={CurrentSimNanos * macros.NANO2MIN:.2f} min: {remaining_fuel:.2f}")
+        if remaining_fuel <= reserve:
+            payload.OnTimeRequest = [0.0 for _ in raw_cmd.OnTimeRequest]
+            logging.debug(f"[{self.logTag}] Limited thrust cmd to 0.0 due to empty fueltank")
+        else:
+            payload.OnTimeRequest = [float(t) for t in raw_cmd.OnTimeRequest]
+
+        self.fuelSafeThrCmdOutMsg.write(payload, CurrentSimNanos)
+
+    
     
     def _zero_gateway_msgs(self):
         """Zero all FSW gateway message payloads"""
