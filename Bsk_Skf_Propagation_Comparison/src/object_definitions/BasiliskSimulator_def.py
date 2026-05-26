@@ -25,7 +25,7 @@ from plotting.plot import PLT_WIDTH, PLT_HEIGHT
 EARTH_RADIUS = 6378136.6 # [m] WGS-84 equatorial radius
 VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Bsk_Skf_Propagation_Comparison/output_data/_VizFiles/bsk_sim.bin"
 GRAV_COEFF_FILE_PATH = "shared_input_data/grav_coeff/GGM03S.txt"
-SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/Kp_ap_Ap_SN_F107_since_2010.txt"
+SPACE_WEATHER_DATA_FILE_PATH = "shared_input_data/msis_data/space_weather_data.txt"
 MSIS_SW_KEYS: list[str] = [
     "ap_24_0",      # 24 hour ap avg. ending now
     "ap_3_0",       # 3 hour ap avg. ending now
@@ -56,7 +56,7 @@ MSIS_SW_KEYS: list[str] = [
 @dataclass_json
 @dataclass
 class SpaceWeatherDay:
-    """One UTC day of space-weather data from Kp_ap_Ap_SN_F107_since_2010.txt."""
+    """One UTC day of space-weather data from space_weather_data.txt."""
     ap: list[int]        # 8x 3-hour ap values: [00-03, 03-06, ..., 21-24]
     Ap: int              # daily Ap
     f107obs: float       # adjusted F10.7
