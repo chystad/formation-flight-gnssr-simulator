@@ -230,7 +230,8 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # ------------------------------------------------------------------
         # 6) Initialize and configure stop time
         # ------------------------------------------------------------------
-        self.SetProgressBar(True)
+        if not self.cfg.mc_enabled:
+            self.SetProgressBar(True)
         self.InitializeSimulation()
         self.ConfigureStopTime(self.simulationDurationNanos)
 
@@ -288,6 +289,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             plt.plot_all_thruster_fuel_plots(scSimDataList)
             # plt.plot_all_per_satellite_GNC_plots(scSimDataList, plt_sat_idx)
             plt.plot_all_eps_plots(scSimDataList, plt_sat_idx, self.cfg.bat_storage_capacity)
+            plt.plot_all_pointing_mode_plots(scSimDataList, plt_sat_idx)
             plt.mpl.show()
             self.cfg.bat_storage_capacity
 

@@ -35,11 +35,11 @@ BURN_ATT_ADJUSTMENT_TIME_SEC = 15.0 # [s] Fixed time from the burn is requested 
 
 SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
 SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state (0, 1)
-EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.6 # The lower limit for when the battery is considered to have enough charge to exit EMERGENCY mode (0, 1)
+EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.7 # The lower limit for when the battery is considered to have enough charge to exit EMERGENCY mode (0, 1)
 CAPTURE_BATTERY_THRESHOLD = 0.4 # The minimum battery percentage (inclusive) required for entering CAPTURE mode (0, 1)
 COMMS_BATTERY_THRESHOLD = 0.3 # The minimum battery percentage (inclusive) required for entering COMMS mode (0, 1)
 CRITICAL_BATTERY_THRESHOLD = 0.2 # Upper limit (exclusive) for when the battery is considered to have critially low charge left (0, 1)
-LOW_BATTERY_THRESHOLD = 0.4 # Upper limit (exclusive) for when the battery is considere to have low charge left (0.1)
+LOW_BATTERY_THRESHOLD = 0.3 # Upper limit (exclusive) for when the battery is considere to have low charge left (0.1)
 MAX_HOURS_SINCE_LAST_COM_THRESHOLD = 12 # Limit (incluse) for when the maximum time has passed since last com. 
                                         # After this, communication will be prioritized over payload capturing.
 MIN_MINUTES_COM_TIME = 10. # Minimum time a comunication event should last, if comunication is feasible 
@@ -54,6 +54,43 @@ class PointingMode(str, Enum):
     BURN = "burn"
     EMERGENCY = "emergency"
     ERROR = "error"
+
+
+POINTING_MODE_TO_INT: dict[PointingMode, int] = {
+    PointingMode.COAST: 0,
+    PointingMode.COMMS: 1,
+    PointingMode.CHARGE: 2,
+    PointingMode.CAPTURE: 3,
+    PointingMode.BURN_TRANSIT: 4,
+    PointingMode.BURN: 5,
+    PointingMode.EMERGENCY: 6,
+    PointingMode.ERROR: 7,
+}
+
+INT_TO_POINTING_MODE: dict[int, PointingMode] = {
+    value: key for key, value in POINTING_MODE_TO_INT.items()
+}
+
+
+class PointingModeRecorder:
+    """
+    Lightweight Python recorder for FswStack.pointingMode.
+
+    This is not a Basilisk message recorder. It is a small Python-side recorder
+    designed to work with SimData and RecorderFlusher.
+    """
+
+    def __init__(self) -> None:
+        self.modeCode: list[int] = []
+        self.timeNanos: list[int] = []
+
+    def record(self, CurrentSimNanos: int, pointing_mode: PointingMode) -> None:
+        self.timeNanos.append(int(CurrentSimNanos))
+        self.modeCode.append(POINTING_MODE_TO_INT[pointing_mode])
+
+    def clear(self) -> None:
+        self.modeCode.clear()
+        self.timeNanos.clear()
 
 
 class _FswStackScheduler(sysModel.SysModel):
@@ -199,10 +236,13 @@ class FswStack():
         self.navTransRecorder: BasiliskRecorder          # Position, velocity
         self.navAttRecorder: Optional[BasiliskRecorder] = None            # Attitude, angular rate
         self.attRefRecorder: Optional[BasiliskRecorder] = None            # Desired attitude, desired angular rate
-        self.attErrRecorder: Optional[BasiliskRecorder] = None           # Attitude tracking error, angular-rate tracking error
+        self.attErrRecorder: Optional[BasiliskRecorder] = None            # Attitude tracking error, angular-rate tracking error
         self.cmdTorqueRecorder: Optional[BasiliskRecorder] = None         # Commanded body torque
         self.rwMotorTorqueRecorder: Optional[BasiliskRecorder] = None     # RW motor torques
-        
+        self.pointingModeRecorder = PointingModeRecorder()                # PointingMode, where each mode corresponds to an int
+        self.pointingModeRecorder_RateNanos = sim.fswRateNanos
+
+
         # Initialize mode switching log file
         self._log_mode_switching_logic(write_header_only=True)
 
@@ -324,6 +364,7 @@ class FswStack():
         self.att_err.UpdateState(CurrentSimNanos)
         self.ctrl.UpdateState(CurrentSimNanos)
         self.rw_map.UpdateState(CurrentSimNanos)
+        self.pointingModeRecorder.record(CurrentSimNanos, self.pointingMode)
 
 
     def _self_init(self):
@@ -1388,11 +1429,11 @@ class FswStack():
         self.activeBurnEventStartNanos = CurrentSimNanos
         self.activeBurnDurationS = current_on_time_max
 
-        logging.debug(
-            f"[{self.logTag}] New logging-only burn event detected at "
-            f"t={CurrentSimNanos * macros.NANO2MIN:.3f} min: "
-            f"estimated burn duration={self.activeBurnDurationS:.6f} s"
-        )
+        # logging.debug(
+        #     f"[{self.logTag}] New logging-only burn event detected at "
+        #     f"t={CurrentSimNanos * macros.NANO2MIN:.3f} min: "
+        #     f"estimated burn duration={self.activeBurnDurationS:.6f} s"
+        # )
 
         return True
     

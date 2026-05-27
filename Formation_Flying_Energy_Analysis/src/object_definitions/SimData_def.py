@@ -34,8 +34,9 @@ class SpacecraftSimData:
     r_BN_N: SampledData # (n, 3) [m] B position relative to N, exporessed in N frame (float64)
     v_BN_N: SampledData # (n, 3) [m/s] B velocity relative to N, expressed in N frame (float64)
     fuelMass: SampledData # (n,) [kg] Fuel mass (float32)
-    storageLevel: SampledData    # (n,) [Ws] Battery stored charge (float32)
-    currentNetPower: SampledData # (n,) [W] Net power received/drained from the battery (float32)
+    storageLevel: SampledData     # (n,) [Ws] Battery stored charge (float32)
+    currentNetPower: SampledData  # (n,) [W] Net power received/drained from the battery (float32)
+    pointingModeCode: SampledData # (n,) [-] Integer-coded PointingMode
 
     # Post-processed data
     r_scB_leaderB_RTN: Optional[SampledData] = None # (n, 3) [m] This sc position relative to leader, expressed in RTN frame (float64)
@@ -192,6 +193,14 @@ class SimData:
         midRateTimes = dynModel.batteryStateRecorder.times() # NOTE This recorder is used to fetch MID sample rate time vector
         dynModel.batteryStateRecorder.clear()
 
+        # PointingMode
+        pointingModeCode_data = SampledData(
+            np.asarray(fsw.pointingModeRecorder.modeCode, dtype=np.int8),
+            fsw.pointingModeRecorder_RateNanos * macros.NANO2SEC,
+            len(fsw.pointingModeRecorder.modeCode),
+        )
+        fsw.pointingModeRecorder.clear()
+
         # Construct scSimData with only mandatory fields to minimize buffer
         if data_mode == "optimized":
             scSimData = SpacecraftSimData(
@@ -200,6 +209,7 @@ class SimData:
                 fuelMass=fuelMass_data,
                 storageLevel=storageLevel_data,
                 currentNetPower=currentNetPower_data,
+                pointingModeCode=pointingModeCode_data,
             )
         
         # Construct scSimData with all relevant fields for debugging 
@@ -386,6 +396,7 @@ class SimData:
                 fuelMass=fuelMass_data,
                 storageLevel=storageLevel_data,
                 currentNetPower=currentNetPower_data,
+                pointingModeCode=pointingModeCode_data,
                 sigma_BN=sigma_BN_data,
                 omega_BN_B=omega_BN_B_data,
                 sigma_RN=sigma_RN_data,

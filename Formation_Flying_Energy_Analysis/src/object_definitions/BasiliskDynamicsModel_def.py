@@ -863,7 +863,7 @@ class BasiliskDynamicsModel:
 
         # Set recorder sample rates
         batteryStateRate = midSampleRateNanos # NOTE: This should always be 'midSampleRateNanos' for 'midRateTimes' to be correct in SimData._pull_single_spacecraft_data
-        fuelTankStateRate = highSampleRateNanos
+        fuelTankStateRate = midSampleRateNanos
         thrusterStateRate = highSampleRateNanos
         rwStateRate = highSampleRateNanos
         sharedPowerRate = midSampleRateNanos

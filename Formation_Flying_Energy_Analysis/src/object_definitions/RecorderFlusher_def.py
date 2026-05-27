@@ -176,6 +176,11 @@ class RecorderFlusher(sysModel.SysModel):
             dyn.batteryStateRecorder_RateNanos * macros.NANO2SEC,
         )
 
+        chunk["pointingModeCode"] = (
+            np.asarray(fsw.pointingModeRecorder.modeCode, dtype=np.int8),
+            fsw.pointingModeRecorder_RateNanos * macros.NANO2SEC,
+        )
+
         if not self.full_debug:
             return chunk
 
@@ -416,6 +421,7 @@ class RecorderFlusher(sysModel.SysModel):
         fsw.navTransRecorder.clear()
         dyn.fuelTankStateRecorder.clear()
         dyn.batteryStateRecorder.clear()
+        fsw.pointingModeRecorder.clear()
 
         if not self.full_debug:
             return

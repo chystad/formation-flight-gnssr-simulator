@@ -54,6 +54,7 @@ class SimDataWriter:
                 self._write_sampled_data_group(h5, "fuelMass", sc_data.fuelMass)
                 self._write_sampled_data_group(h5, "storageLevel", sc_data.storageLevel)
                 self._write_sampled_data_group(h5, "currentNetPower", sc_data.currentNetPower)
+                self._write_sampled_data_group(h5, "pointingModeCode", sc_data.pointingModeCode)
 
                 # Optional post-processed RTN fields
                 if sc_data.r_scB_leaderB_RTN is not None:
@@ -92,6 +93,7 @@ class SimDataWriter:
                 self._write_sampled_data_group(h5, "fuelMass", sc_data.fuelMass)
                 self._write_sampled_data_group(h5, "storageLevel", sc_data.storageLevel)
                 self._write_sampled_data_group(h5, "currentNetPower", sc_data.currentNetPower)
+                self._write_sampled_data_group(h5, "pointingModeCode", sc_data.pointingModeCode)
 
                 # Optional debug fields
                 if sc_data.r_scB_leaderB_RTN is not None:
