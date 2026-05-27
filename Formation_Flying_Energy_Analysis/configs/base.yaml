@@ -1,7 +1,7 @@
 # Overall simulation settings
 SIMULATION:
-  startTime: "23.10.2024 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 8 # [hours] 2160=3mnd, 720=1mnd
+  startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
+  simulationDuration: 24 # [hours] 2160=3mnd, 720=1mnd
   deltaT: 0.5 # [sec] Solver max time step 
   integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
   num_satellites: 2
@@ -18,7 +18,7 @@ SIMULATION:
 # Satellite parameters
 SATELLITES:
   leader:
-    m_s: 5.872      # [kg]  Satellite dry mass
+    m_s: 5.272      # [kg]  Satellite dry mass
     C_D: 2.2      # [-]   Drag coefficient
     A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
     C_R: 1.21     # [-]   Radiation pressure coefficient
@@ -29,10 +29,10 @@ SATELLITES:
     r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
     r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
     deploy_vel: [0.0, 0.0, 0.0] # [m/s] Deployment velocity from shared deployer, expressed in N frame
-    init_att: [[0.3], [0.2], [-0.2]]    # Orientation of Body relative to Inertial expressed using MRP
+    init_att: [[0.], [0.], [0.]]    # Orientation of Body relative to Inertial expressed using MRP
     init_angvel: [[0.0], [0.0], [0.0]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
-    m_s: 5.872
+    m_s: 5.272
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
@@ -46,7 +46,7 @@ SATELLITES:
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.0], [0.], [0.]] 
   follower-2:
-    m_s: 5.872
+    m_s: 5.272
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
@@ -59,20 +59,6 @@ SATELLITES:
     deploy_vel: [0.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.0], [0.], [0.]] 
-  follower-3:
-    m_s: 8.0
-    C_D: 2.2
-    A_D: 0.06
-    C_R: 1.21 
-    A_srp: 0.06
-    I_B: [0.06666667, 0.,         0.,        
-          0.,         0.08666667, 0.,
-          0.,         0.,         0.03333333]
-    r_BP_B: [0, 0, 1]
-    r_BA_B: [0, 1, 0]
-    deploy_vel: [1.0, 0.0, 0.0]
-    init_att: [[0.], [0.], [0.]]
-    init_angvel: [[0.1], [0.], [0.]] 
 
 # TODO
 FORMATION_CONTROL:
@@ -111,7 +97,7 @@ GROUND_STATIONS:
 # Electrical Power System parameters (same for all satellites) 
 EPS_PARAMETERS:
   bat_storage_capacity: 100.0   # [Wh] Battery max storage capacity
-  init_bat_charge: 1.0        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
+  init_bat_charge: 0.8        # [-] Initial battery charge as fraction of max storage capacity (0, 1)
   RW_base_draw: 0.34           # [W] Idle/baseline power consumption for each RW (> 0)
   OBC_const_draw: 2.0         # [W] Constant OBC power consumption (> 0)
   solar_panels:
