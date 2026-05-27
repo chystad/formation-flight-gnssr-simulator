@@ -362,7 +362,7 @@ def plot_propulsion_sys_for_all_satellites(
                 f"to have shape (n_samples, 3), got {thrust_B.shape}."
             )
 
-        t_thrust_h = (np.arange(thrust_data.n_samples) * thrust_data.dt_s)
+        t_thrust_h = (np.arange(thrust_data.n_samples) * thrust_data.dt_s) / 60
         thrust_mag = np.linalg.norm(thrust_B, axis=1)
 
         axs[0].plot(
@@ -391,7 +391,7 @@ def plot_propulsion_sys_for_all_satellites(
                 f"to have shape (n_samples, 3), got {torque_B.shape}."
             )
 
-        t_torque_h = (np.arange(torque_data.n_samples) * torque_data.dt_s)
+        t_torque_h = (np.arange(torque_data.n_samples) * torque_data.dt_s) / 60
         torque_mag = np.linalg.norm(torque_B, axis=1)
 
         axs[1].plot(
@@ -414,7 +414,7 @@ def plot_propulsion_sys_for_all_satellites(
                 f"to have shape (n_samples,), got {fuel_mass.shape}."
             )
 
-        t_fuel_h = (np.arange(fuel_data.n_samples) * fuel_data.dt_s)
+        t_fuel_h = (np.arange(fuel_data.n_samples) * fuel_data.dt_s) / 60
 
         axs[2].plot(
             t_fuel_h,
@@ -424,15 +424,15 @@ def plot_propulsion_sys_for_all_satellites(
         )
 
     axs[0].set_title("Thrust force magnitude")
-    axs[0].set_xlabel("Time [s]")
+    axs[0].set_xlabel("Time [min]")
     axs[0].set_ylabel("Thrust [N]")
 
     axs[1].set_title("Thrust torque magnitude")
-    axs[1].set_xlabel("Time [s]")
+    axs[1].set_xlabel("Time [min]")
     axs[1].set_ylabel("Torque [Nm]")
 
     axs[2].set_title("Fuel mass")
-    axs[2].set_xlabel("Time [s]")
+    axs[2].set_xlabel("Time [min]")
     axs[2].set_ylabel("Fuel mass [kg]")
     axs[2].ticklabel_format(axis="y", style="plain", useOffset=False)
 
