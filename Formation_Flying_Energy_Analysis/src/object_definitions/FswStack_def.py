@@ -28,12 +28,11 @@ if TYPE_CHECKING:
 
 LOG_DATA_SAVE_DIR = Path('Formation_Flying_Energy_Analysis/output_data/logs')
 
-BURN_ATT_TOLERANCE: float = 0.01 # MRP norm
-BURN_RATE_TOLERANCE: float = 0.01 # rate norm
-
 MRP_K: float = 0.05 # MRP pointing controller: Gain on MRP attitude error 
 MRP_P: float = 0.035 # MRP pointing controller: Gain on Rate error
 MRP_KI: float = -1  # MRP pointing controller: Integral gain (-1 -> disable)
+BURN_ATT_ADJUSTMENT_TIME_SEC = 15.0 # [s] Fixed time from the burn is requested until it is executed. 
+
 SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
 SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state (0, 1)
 EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.6 # The lower limit for when the battery is considered to have enough charge to exit EMERGENCY mode (0, 1)
@@ -155,9 +154,20 @@ class FswStack():
         self.logTag = f"FSW{sat_idx}"
         self.pointingMode = PointingMode.COAST
 
-        self.DEBUG_sc_I = DEBUG_sc_I
+        # Burn request detection
+        self.activeBurnRequest = False
+        self.activeBurnEventStartNanos: Optional[int] = None
+        self.activeBurnDurationS = 0.0
+        self.prevFormationOnTimeMax = 0.0
 
-        self.it = 0
+        # Burn attitude request detection
+        self.activeBurnAttRequest = False
+        self.activeBurnAttRequestStartNanos: Optional[int] = None
+        self.prevFormationAttRefSignature = np.zeros(6)
+        self.burnDetectedDuringActiveAttRequest = False
+
+
+        self.DEBUG_sc_I = DEBUG_sc_I
 
         # Create FSW task as part of the FSW process
         assert sim.fswProcesses[sat_idx] is not None
@@ -559,7 +569,7 @@ class FswStack():
         
         # Initialize logical parameters dependent on burn request from FormationControlStack
         burnRequested = False # True if the thrusters are required to run more than XXX seconds to maintain formation
-        burnAttitudeReached = False  # True if attitude is close enough to requested burn attitude
+        burnAttRequested = False # True if a burn attitude is requested
         
         # NOTE: Is this even needed if all parameters are assigned during runtime anyway? 
         # Initialize position-dependent logical parameters 
@@ -672,18 +682,18 @@ class FswStack():
 
 
         # ---- Decide if spacecraft burn is requested, and if so, is the requested attitude reached (set burnRequested, burnAttitudeReached) ---- #
-        # if self.formEnabled and self.sat_idx != 0:
-        #     burnRequested = self._formation_burn_requested()
+        if self.formEnabled and self.sat_idx != 0:
+            burnAttRequested = self._formation_burn_attitude_requested(CurrentSimNanos)
+            burnRequested = self._formation_burn_requested(CurrentSimNanos)
+            
+            if burnAttRequested:
+                logging.debug(f"[{self.logTag}] burn attitude requested @ t={CurrentSimNanos * macros.NANO2MIN} min")
 
-        #     if burnRequested:
-        #         logging.debug(f"[{self.logTag}] burn requested @ t={CurrentSimNanos * macros.NANO2MIN} min")
-        #         # burnAttitudeReached = self._burn_attitude_reached()
-                
-        #     else:
-        #         burnAttitudeReached = False
-        # else:
-        #     burnRequested = False
-        #     burnAttitudeReached = False
+            # if burnRequested:
+                # logging.debug(f"[{self.logTag}] burn requested @ t={CurrentSimNanos * macros.NANO2MIN} min")
+        else:
+            burnAttRequested = False
+            burnRequested = False
 
 
         # ---- Set helper logical parameters for readability and easier easier debugging ---- # 
@@ -708,11 +718,13 @@ class FswStack():
                 nextMode = PointingMode.EMERGENCY
 
         # Override normal pointing operations with burn pointing
-        elif burnRequested: 
-            if burnAttitudeReached:
+        elif burnAttRequested or burnRequested:
+            if burnRequested:
                 nextMode = PointingMode.BURN
-            else:
+            elif burnAttRequested:
                 nextMode = PointingMode.BURN_TRANSIT
+            else:
+                nextMode = PointingMode.ERROR
 
         # Normal formation-independent operations
         elif not maxNoCom:
@@ -782,8 +794,7 @@ class FswStack():
                     # formAttRefInMsg=self.formAttRefInMsg.read().sigma_RN, # type: ignore
                     # formThrCmdInMsg=list(cmd.OnTimeRequest) if cmd is not None else None,
                     thrOnTimeCmdOutMsg=None,
-                    burnRequested=burnRequested,
-                    burnAttitudeReached=burnAttitudeReached,
+                    burnRequested=burnRequested
             )
             else:
                 self._log_mode_switching_logic(
@@ -803,8 +814,7 @@ class FswStack():
                     formAttRefInMsg=None,
                     formThrCmdInMsg=None,
                     thrOnTimeCmdOutMsg=None,
-                    burnRequested=burnRequested,
-                    burnAttitudeReached=burnAttitudeReached,
+                    burnRequested=burnRequested
             )
     
     
@@ -857,7 +867,7 @@ class FswStack():
         self.form_ctrl.thrustConfigInMsg.subscribeTo(self.thrConfigArrayMsg)
         self.form_ctrl.vehicleConfigInMsg.subscribeTo(self.massVehicleConfigOutMsg)
         self.form_ctrl.mu = self.sim.envModel.gravFactory.gravBodies["earth"].mu 
-        self.form_ctrl.attControlTime = 15  # [s]
+        self.form_ctrl.attControlTime = BURN_ATT_ADJUSTMENT_TIME_SEC  # [s] "Padding" time from burn is requested until executed. Time used to adjust attitue 
 
         # connect a blank chief message
         chiefData = messaging.NavTransMsgPayload()
@@ -1162,56 +1172,250 @@ class FswStack():
         # Zero all actuator commands
         self.rw_map.rwMotorTorqueOutMsg.write(messaging.ArrayMotorTorqueMsgPayload())
         self.form_ctrl.onTimeOutMsg.write(messaging.THRArrayOnTimeCmdMsgPayload())
-    
 
-    def _formation_burn_requested(self) -> bool:
+
+    def _formation_burn_attitude_requested(self, CurrentSimNanos: int) -> bool:
         """
-        Return True if the formation controller is requesting a nonzero thruster burn.
+        Return True while a logging-only formation burn attitude request is active.
 
-        This method treats the spacecraftReconfig module as the authority on whether
-        formation station-keeping requires thrust. If any requested thruster on-time
-        is larger than a small tolerance, the pointing mode should enter
-        BURN_TRANSIT or BURN.
+        A burn attitude request is detected from a new/change in the
+        spacecraftReconfig attitude reference output. The request remains active
+        while waiting for the corresponding burn command, and then remains active
+        during the burn itself.
+
+        This method only affects logging mode selection:
+            burnAttRequested and not burnRequested -> BURN_TRANSIT
+            burnAttRequested and burnRequested     -> BURN
+
+        Attitude and thrust are still handled by spacecraftReconfig.
         """
 
-        # The leader should not perform formation-maintenance burns.
+        ############
+        # This approach does not work because 'spacecraftReconfig' publishes attitude requests 
+        # periodically, and not in the approximate time around a burn execution. 
+        ############
+        return False
+
+        # if (not self.formEnabled) or (self.sat_idx == 0):
+        #     self.activeBurnAttRequest = False
+        #     self.activeBurnAttRequestStartNanos = None
+        #     self.prevFormationAttRefSignature = np.zeros(6)
+        #     self.burnDetectedDuringActiveAttRequest = False
+        #     return False
+
+        # att_ref_change_tol = 1e-8
+        # max_wait_for_burn_s = BURN_ATT_ADJUSTMENT_TIME_SEC + 5.0
+
+        # def _read_current_att_ref_signature() -> Optional[NDArray[np.float64]]:
+        #     try:
+        #         att_ref = self.form_ctrl.attRefOutMsg.read()
+        #     except Exception as e:
+        #         logging.debug(
+        #             f"[{self.logTag}] Could not read formation-control attitude reference: {repr(e)}"
+        #         )
+        #         return None
+
+        #     sigma_RN = np.array(att_ref.sigma_RN, dtype=float)
+        #     omega_RN_N = np.array(att_ref.omega_RN_N, dtype=float)
+
+        #     return np.concatenate((sigma_RN, omega_RN_N))
+
+        # # --------------------------------------------------
+        # # 1. If an attitude request is already active, keep it
+        # #    active until the associated burn has completed.
+        # # --------------------------------------------------
+        # if self.activeBurnAttRequest:
+        #     if self.activeBurnRequest:
+        #         # A burn has now been detected during this attitude request.
+        #         # Stay in burn-pointing override while the burn event is active.
+        #         self.burnDetectedDuringActiveAttRequest = True
+        #         return True
+
+        #     if self.burnDetectedDuringActiveAttRequest:
+        #         # The corresponding burn was active before, but is no longer active.
+        #         # Therefore the burn-attitude request has served its purpose.
+        #         current_signature = _read_current_att_ref_signature()
+        #         if current_signature is not None:
+        #             self.prevFormationAttRefSignature = current_signature
+
+        #         self.activeBurnAttRequest = False
+        #         self.activeBurnAttRequestStartNanos = None
+        #         self.burnDetectedDuringActiveAttRequest = False
+        #         return False
+
+        #     # No burn has started yet. Keep BURN_TRANSIT active while waiting
+        #     # for spacecraftReconfig to issue the corresponding burn command.
+        #     if self.activeBurnAttRequestStartNanos is None:
+        #         self.activeBurnAttRequestStartNanos = CurrentSimNanos
+
+        #     elapsed_wait_s = (
+        #         CurrentSimNanos - self.activeBurnAttRequestStartNanos
+        #     ) * macros.NANO2SEC
+
+        #     if elapsed_wait_s <= max_wait_for_burn_s:
+        #         return True
+
+        #     # Timeout: attitude request was detected, but no burn followed.
+        #     # Clear the request to avoid getting stuck in BURN_TRANSIT forever.
+        #     current_signature = _read_current_att_ref_signature()
+        #     if current_signature is not None:
+        #         self.prevFormationAttRefSignature = current_signature
+
+        #     self.activeBurnAttRequest = False
+        #     self.activeBurnAttRequestStartNanos = None
+        #     self.burnDetectedDuringActiveAttRequest = False
+
+        #     logging.debug(
+        #         f"[{self.logTag}] Burn attitude request timed out at "
+        #         f"t={CurrentSimNanos * macros.NANO2MIN:.3f} min"
+        #     )
+
+        #     return False
+
+        # --------------------------------------------------
+        # 2. No active attitude request: detect a new or changed
+        #    spacecraftReconfig attitude reference.
+        # --------------------------------------------------
+        # current_signature = _read_current_att_ref_signature()
+        # if current_signature is None:
+        #     return False
+
+        # signature_change = np.linalg.norm(
+        #     current_signature - self.prevFormationAttRefSignature
+        # )
+
+        # current_signature_norm = np.linalg.norm(current_signature)
+
+        # new_attitude_request = (
+        #     current_signature_norm > att_ref_change_tol
+        #     and signature_change > att_ref_change_tol
+        # )
+
+        # self.prevFormationAttRefSignature = current_signature
+
+        # if not new_attitude_request:
+        #     return False
+
+        # self.activeBurnAttRequest = True
+        # self.activeBurnAttRequestStartNanos = CurrentSimNanos
+        # self.burnDetectedDuringActiveAttRequest = False
+
+        # logging.debug(
+        #     f"[{self.logTag}] New logging-only burn attitude request detected at "
+        #     f"t={CurrentSimNanos * macros.NANO2MIN:.3f} min"
+        # )
+
+        # return True
+
+
+    def _formation_burn_requested(self, CurrentSimNanos: int) -> bool:
+        """
+        Return True while a logging-only formation burn event is active.
+
+        A burn event is triggered when spacecraftReconfig produces a new nonzero
+        on-time command. Once detected, the burn request remains active for the
+        estimated burn duration.
+
+        This function only affects logging modes. Attitude and thrust are still
+        handled by spacecraftReconfig.
+        """
+
         if (not self.formEnabled) or (self.sat_idx == 0):
+            self.activeBurnRequest = False
+            self.activeBurnEventStartNanos = None
+            self.activeBurnDurationS = 0.0
+            self.prevFormationOnTimeMax = 0.0
             return False
 
+        on_time_tol = 1e-9
+
+        # --------------------------------------------------
+        # 1. If a burn event is already active, keep it active
+        #    until the estimated burn duration has elapsed.
+        # --------------------------------------------------
+        if self.activeBurnRequest:
+            if self.activeBurnEventStartNanos is None:
+                self.activeBurnEventStartNanos = CurrentSimNanos
+
+            elapsed_event_s = (
+                CurrentSimNanos - self.activeBurnEventStartNanos
+            ) * macros.NANO2SEC
+
+            if elapsed_event_s < self.activeBurnDurationS:
+                return True
+
+            # Burn logging window completed.
+            self.activeBurnRequest = False
+            self.activeBurnEventStartNanos = None
+            self.activeBurnDurationS = 0.0
+
+            return False
+
+        # --------------------------------------------------
+        # 2. No active event: look for a new spacecraftReconfig
+        #    burn command.
+        # --------------------------------------------------
         try:
             thr_cmd = self.form_ctrl.onTimeOutMsg.read()
-        except Exception:
-            logging.debug(f"[{self.logTag}] Could not read formation-control thrust command.")
+        except Exception as e:
+            logging.debug(
+                f"[{self.logTag}] Could not read formation-control thrust command: {repr(e)}"
+            )
             return False
 
         on_time_request = np.array(thr_cmd.OnTimeRequest, dtype=float)
 
         if on_time_request.size == 0:
+            current_on_time_max = 0.0
+        else:
+            current_on_time_max = float(np.max(on_time_request))
+
+        new_burn_command = (
+            current_on_time_max > on_time_tol
+            and (
+                self.prevFormationOnTimeMax <= on_time_tol
+                or abs(current_on_time_max - self.prevFormationOnTimeMax) > on_time_tol
+            )
+        )
+
+        self.prevFormationOnTimeMax = current_on_time_max
+
+        if not new_burn_command:
             return False
 
-        on_time_tol = 1e-9  # [s], numerical tolerance
+        # New logging-only burn event detected.
+        self.activeBurnRequest = True
+        self.activeBurnEventStartNanos = CurrentSimNanos
+        self.activeBurnDurationS = current_on_time_max
 
-        return bool(np.any(on_time_request > on_time_tol))
+        logging.debug(
+            f"[{self.logTag}] New logging-only burn event detected at "
+            f"t={CurrentSimNanos * macros.NANO2MIN:.3f} min: "
+            f"estimated burn duration={self.activeBurnDurationS:.6f} s"
+        )
+
+        return True
     
     
-    def _burn_attitude_reached(self) -> bool:
+    def _burn_attitude_reached(self, CurrentSimNanos: int) -> bool:
         """
-        True if current attitude tracking error is small enough to safely fire thruster.
-        Uses the attTrackingError output from the previous FSW cycle.
+        Return True after the fixed BURN_TRANSIT duration has elapsed.
+
+        This does not control attitude or thrust. It only determines whether the
+        logging mode should be BURN_TRANSIT or BURN.
         """
-        try:
-            att_err = self.att_err.attGuidOutMsg.read()
-            sigma_BR = np.array(att_err.sigma_BR, dtype=float)
-            omega_BR_B = np.array(att_err.omega_BR_B, dtype=float)
 
-            burn_att_reached = bool(np.linalg.norm(sigma_BR) <= BURN_ATT_TOLERANCE)
-            burn_rate_reached = bool(np.linalg.norm(omega_BR_B) <= BURN_RATE_TOLERANCE)
-
-            return burn_att_reached and burn_rate_reached
-        
-        except Exception:
-            logging.debug(f"[{self.logTag}] Failed to determine if required burn attitude has been reached")
+        if not self.activeBurnRequest:
             return False
+
+        if self.activeBurnEventStartNanos is None:
+            return False
+
+        elapsed_event_s = (
+            CurrentSimNanos - self.activeBurnEventStartNanos
+        ) * macros.NANO2SEC
+
+        return elapsed_event_s >= BURN_ATT_ADJUSTMENT_TIME_SEC
         
     
     def _log_mode_switching_logic(
@@ -1242,11 +1446,11 @@ class FswStack():
         """
 
         # Ensure the log directory exists
-        LOG_DATA_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        self.sim.cfg.output_data_save_dir.mkdir(parents=True, exist_ok=True)
         
-        filename = f"{self.logTimestamp}_{self.logTag}_mode_switching_logic.csv"
+        filename = f"{self.logTag}_mode_switching.csv"
 
-        filepath = LOG_DATA_SAVE_DIR / filename
+        filepath = self.sim.cfg.output_data_save_dir / filename
 
         header = [
             "ModelTag",
