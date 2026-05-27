@@ -8,6 +8,7 @@ from Basilisk.utilities import orbitalMotion
 from Basilisk.utilities import unitTestSupport
 
 from object_definitions.SimData_def import SpacecraftSimData
+from object_definitions.FswStack_def import INT_TO_POINTING_MODE
 
 
 # Global X-component vector colors
@@ -40,6 +41,11 @@ def plot_all_eps_plots(scSimDataList: list[SpacecraftSimData], sat_idx: int, bat
     plot_single_satellite_eps_power(scSimData, sat_idx)
     plot_single_satellite_battery_energy_fraction(scSimData, sat_idx, bat_storage_capacity_Wh)
     plot_single_satellite_eps_overview(scSimData, sat_idx, bat_storage_capacity_Wh)
+
+
+def plot_all_pointing_mode_plots(scSimDataList: list[SpacecraftSimData], sat_idx: int) -> None:
+    scSimData = scSimDataList[sat_idx]
+    plot_single_satellite_pointing_mode(scSimData, sat_idx)
 
 ################################
 # All follower formation plots #
@@ -635,8 +641,6 @@ def plot_single_satellite_rw_torques_and_speeds(
 
 
 
-
-
 ###########################
 # Per satellite EPS plots #
 ###########################
@@ -1154,4 +1158,35 @@ def plot_single_satellite_eps_overview(
         ax.grid(True)
         ax.legend()
 
+    mpl.tight_layout()
+
+
+
+
+######################
+# Pointing Mode Plot #
+######################
+
+def plot_single_satellite_pointing_mode(
+    scSimData: SpacecraftSimData,
+    sat_idx: int,
+) -> None:
+    mode_data = scSimData.pointingModeCode
+    mode_code = mode_data.data
+
+    t_h = np.arange(mode_data.n_samples) * mode_data.dt_s / 3600.0
+
+    fig, ax = mpl.subplots(figsize=(10, 4))
+    ax.step(t_h, mode_code, where="post")
+
+    ax.set_title(f"Pointing mode for spacecraft #{sat_idx}")
+    ax.set_xlabel("Time [h]")
+    ax.set_ylabel("Pointing mode [-]")
+
+    tick_values = list(INT_TO_POINTING_MODE.keys())
+    tick_labels = [mode.value for mode in INT_TO_POINTING_MODE.values()]
+    ax.set_yticks(tick_values)
+    ax.set_yticklabels(tick_labels)
+
+    ax.grid(True)
     mpl.tight_layout()
