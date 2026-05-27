@@ -769,7 +769,7 @@ class BasiliskDynamicsModel:
         # On/off Payload system sink
         payPowerSink = simplePowerSink.SimplePowerSink()
         payPowerSink.ModelTag = f"{self.scObj.ModelTag}_PayPower"
-        payPowerSink.nodePowerOut = -1 * 6.0  # [W]
+        payPowerSink.nodePowerOut = -1 * 12.0  # [W]
 
         # On/off Propulsion system idle sink
         propIdlePowerSink = simplePowerSink.SimplePowerSink()

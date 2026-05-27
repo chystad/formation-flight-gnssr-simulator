@@ -18,42 +18,42 @@ SIMULATION:
 # Satellite parameters
 SATELLITES:
   leader:
-    m_s: 5.272      # [kg]  Satellite dry mass
+    m_s: 6.575    # [kg]  Satellite dry mass. Propellant mass will be added by fuel tank effector
     C_D: 2.2      # [-]   Drag coefficient
     A_D: 0.06     # [m^2] Cross-section area perpendicular to the velocity vector
     C_R: 1.21     # [-]   Radiation pressure coefficient
     A_srp: 0.06   # [m^2] Cross-section area perpendicular to thhe Sun-vector
-    I_B: [0.049221667, 0.,          0.,
-          0.,          0.024610833, 0.,
-          0.,          0.,          0.063988167] # [kgm^2] Inertia of hub about point Bc in B frame components
+    I_B: [0.060081667, 0.,          0.,
+          0.,          0.030040833, 0.,
+          0.,          0.,          0.078106167] # [kgm^2] Inertia of hub about point Bc in B frame components
     r_BP_B: [0, 0, 1] # TODO Unit vector along principle axis from body (B) to spacecraft face with the largest panel area (P) expressed in B
     r_BA_B: [0, 1, 0] # TODO Unit vector along principle axis from body (B) to spacecraft face with communication antenna (A) expressed in B
     deploy_vel: [0.0, 0.0, 0.0] # [m/s] Deployment velocity from shared deployer, expressed in N frame
     init_att: [[0.], [0.], [0.]]    # Orientation of Body relative to Inertial expressed using MRP
     init_angvel: [[0.0], [0.0], [0.0]] # Angular velocity of Body relative to Inertial expressed in Body
   follower-1:
-    m_s: 5.272
+    m_s: 6.575
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.049221667, 0.,          0.,
-          0.,          0.024610833, 0.,
-          0.,          0.,          0.063988167]
+    I_B: [0.060081667, 0.,          0.,
+          0.,          0.030040833, 0.,
+          0.,          0.,          0.078106167]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
     deploy_vel: [0.0, 0.0, 0.0]
     init_att: [[0.], [0.], [0.]]
     init_angvel: [[0.0], [0.], [0.]] 
   follower-2:
-    m_s: 5.272
+    m_s: 6.575
     C_D: 2.2
     A_D: 0.06
     C_R: 1.21 
     A_srp: 0.06
-    I_B: [0.049221667, 0.,          0.,
-          0.,          0.024610833, 0.,
-          0.,          0.,          0.063988167]
+    I_B: [0.060081667, 0.,          0.,
+          0.,          0.030040833, 0.,
+          0.,          0.,          0.078106167]
     r_BP_B: [0, 0, 1]
     r_BA_B: [0, 1, 0]
     deploy_vel: [0.0, 0.0, 0.0]
