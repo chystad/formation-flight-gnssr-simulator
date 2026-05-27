@@ -94,9 +94,9 @@ def plot(cfg: Config) -> None:
     # skf_base_data_timestamp = cfg.old_skf_data_timestamp
 
 
-    ##################################
-    # Ex1 Skf / Bsk Final Comparison #
-    ##################################
+    ######################################
+    # OLD Ex1 Skf / Bsk Final Comparison #
+    ######################################
     # bsk_data_timestamps = [
     #                     #    ("20260217_113854", "Bsk: All (w. Exp atm, H0=7200), dt=5s, RKF78, OLD SIM"), # From old sim. For comparison.
     #                        ("20260217_143841", "Bsk: All (w. MSIS atm, SH4), dt=5s, RKF78"),
@@ -106,9 +106,9 @@ def plot(cfg: Config) -> None:
 
 
 
-    ##################################
-    # Ex2 Skf / Bsk Final Comparison #
-    ##################################
+    ######################################
+    # OLD Ex2 Skf / Bsk Final Comparison #
+    ######################################
     # bsk_data_timestamps = [
     #                     #    ("20260217_113854", "Bsk: All (w. Exp atm, H0=7200), dt=5s, RKF78, OLD SIM"), # From old sim. For comparison.
     #                        ("20260217_151158", "Bsk: All (w. Exp atm H0=7200, SH4)"),
@@ -151,43 +151,75 @@ def plot(cfg: Config) -> None:
     # skf_base_data_timestamp = "20260217_143841"
 
     # For startTime: 01.01.2026 00:00:30
-    bsk_data_timestamps = [
-                           ("20260218_182701", "Bsk: All (w. Exp atm H0=7200, SH4)"),
-                           ("20260218_182511", "Bsk: All (w. Exp atm H0=15472.3, SH4)"),
-                        #    ("20260218_182925", "Bsk: All (w. MSIS atm, SH4)"),
-                        #    ("20260218_180948", "Bsk: All (w. MSIS atm, SH4), m_s = 9.0"),
-                        #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),
-                        #    ("20260218_183732", "Bsk: All (w. MSIS atm, SH4), m_s = 7.5"),
-                        #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),                   
-    ]
-    base_label = "Skf: SGP4 (base)"
-    skf_base_data_timestamp = "20260218_180948"
-
-
-    #####################################################################################
-    # Misc #
-    #####################################################################################
     # bsk_data_timestamps = [
-    #                     #    ("20260218_192909", "Bsk: All (w. MSIS atm, SH4), dt=10s, start=23.12.2025"),    
-    #                        ("20260218_194031", "Bsk: All (w. MSIS atm, SH4), dt=10s, start=01.12.2025"),    
-                                     
+    #                        ("20260218_182701", "Bsk: All (w. Exp atm H0=7200, SH4)"),
+    #                        ("20260218_182511", "Bsk: All (w. Exp atm H0=15472.3, SH4)"),
+    #                     #    ("20260218_182925", "Bsk: All (w. MSIS atm, SH4)"),
+    #                     #    ("20260218_180948", "Bsk: All (w. MSIS atm, SH4), m_s = 9.0"),
+    #                     #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),
+    #                     #    ("20260218_183732", "Bsk: All (w. MSIS atm, SH4), m_s = 7.5"),
+    #                     #    ("20260218_181654", "Bsk: All (w. MSIS atm, SH4), m_s = 12.0"),                   
     # ]
     # base_label = "Skf: SGP4 (base)"
-    # skf_base_data_timestamp = "20260218_194031"
+    # skf_base_data_timestamp = "20260218_180948"
+
+
+
+    ##########################################
+        # FINAL Ex1 Skf / Bsk Comparison #
+    ##########################################
+        # Purpose: Benchmark the highest-fidelity thesis Basilisk propagation configuration 
+        # against a continuously updating TLE Skyfield-SGP4 reference, and compare it with the 
+        # specialization-project Basilisk configuration to quantify the propagation-model improvement 
+        # used for the GNSS-R lifetime analysis.
+    bsk_data_timestamps = [
+                           ("20260527_160230", "New Bsk: All (w. MSIS atm)"),
+                           ("20260527_162418", "Old Bsk: All (w. Exp atm H0=7200)"), # From old sim. For comparison.           
+                           ("20260527_203638", "Bsk: All (w. Exp atm H0=15180)"),          
+    ]
+    # NOTE: Remember to change theplotting functions to enable SKYFYELD to become the baseline!
+    base_label = "Skf: SGP4 (w. updating TLEs) (base)"
+    skf_base_data_timestamp = "20260527_160230"
+
+
+
+
+
+    ##########################################
+        # FINAL Ex2 Skf / Bsk Comparison #
+    ##########################################
+        # Quantify the influence of atmospheric drag modelling on the Basilisk propagation results 
+        # by comparing NRLMSISE-00 drag with old and retuned exponential atmosphere models, using Keplerian motion 
+        # and spherical harmonics as reference cases for interpreting the drag-induced drift magnitude.
+    # bsk_data_timestamps = [
+    #                        ("20260527_171228", "Bsk (w. SH4)"),
+    #                        ("20260527_171654", "Bsk (w. Exp atm H0=7200)"),
+    #                        ("20260527_172129", "Bsk (w. Exp atm H0=15180)"),
+    #                        ("20260527_172629", "Bsk (w. NRLMSISE-00 atm)"),                           
+    # ]
+    # # NOTE: REMEMBER TO CHANGE THE PLOTTING FUNCTIONS TO ENABLE BASILISK TO BECOME THE BASELINE!
+    # base_label = "Bsk (no perturb)"
+    # skf_base_data_timestamp = "20260527_170234" # Basilisk run with no perturbations enabled
+
+
+
+
     
     plot_multi_sim_pos_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_multi_sim_pos_vel_sim_diff_mag(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_alt_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_simulator_state_mag_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
-    # plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
-                                                    #  start_plot_time_hours=160.0,
-                                                    #  end_plot_time_hours=168,
-                                                    #  view_lon_min=-3.0,
-                                                    #  view_lon_max=33.0,
-                                                    #  view_lat_min=56.0,
-                                                    #  view_lat_max=73.0
-                                                    #  )
-    # plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_groundtrack_multi_sim_comparison_start_stop(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label,
+                                                     start_plot_time_hours=330.0,
+                                                     end_plot_time_hours=336,
+                                                     view_lon_min=-3.0,
+                                                     view_lon_max=33.0,
+                                                     view_lat_min=54.0,
+                                                     view_lat_max=72.0
+                                                     )
+    plot_leader_oe_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_leader_pos_rtn_error(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
+    plot_rel_pos_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_rel_pos_multi_sim_diff_no_radial(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
     # plot_rel_vel_multi_sim_diff(cfg, skf_base_data_timestamp, bsk_data_timestamps, base_label)
 
@@ -1588,7 +1620,7 @@ def plot_rel_vel_multi_sim_diff(
     data_processor = DataProcessor()
 
     # --------- Load Skyfield baseline ---------
-    skf_stamp = f"{skf_base_data_timestamp}_bsk" # REMEMBER TO SELECT CORRECT STRING ENDING
+    skf_stamp = f"{skf_base_data_timestamp}_skf" # REMEMBER TO SELECT CORRECT STRING ENDING
     skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
     if len(skf_files) == 0:
         raise FileNotFoundError(f"No Skyfield datafiles found for timestamp '{skf_stamp}'")
@@ -1732,6 +1764,591 @@ def plot_rel_vel_multi_sim_diff(
     conditional_show_plot(cfg)
 
 
+
+
+def plot_leader_pos_rtn_error(
+    cfg: Config,
+    skf_base_data_timestamp: str,
+    bsk_data_timestamps: list[tuple[str, str]],
+    base_label: str,
+) -> None:
+    """
+    Compare multiple Basilisk simulations against a single Skyfield baseline
+    by expressing the leader position error in the baseline leader RTN frame.
+
+    For each evaluated simulation:
+        diff_N = r_eval_N - r_base_N
+
+    The difference vector is then transformed into the RTN frame defined by
+    the baseline leader state at each time step.
+
+    Output: ONE figure with 3 stacked subplots:
+      Top:    along-track (T) position error
+      Middle: cross-track (N) position error
+      Bottom: radial (R) position error
+
+    Inputs:
+        skf_base_data_timestamp:
+            Timestamp of the Skyfield baseline, without '_skf'.
+        bsk_data_timestamps:
+            List of tuples: (timestamp_string, legend_label)
+            for evaluated Basilisk simulations.
+        base_label:
+            Legend label for the baseline.
+    """
+    main_plt_identifier = "LeaderPosRTNError"
+
+    data_loader = DataLoader()
+    data_processor = DataProcessor()
+
+    # --------- Load Skyfield baseline ---------
+    skf_stamp = f"{skf_base_data_timestamp}_skf" # REMEMBER TO CHANGEEEE!
+    skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
+    if len(skf_files) == 0:
+        raise FileNotFoundError(f"No Skyfield baseline datafiles found for timestamp '{skf_stamp}'")
+
+    skf_sim_data = data_loader.load_sim_data_file(skf_files[0])
+
+    # --------- Select baseline leader spacecraft ---------
+    leader_index = 0
+    if len(skf_sim_data.sim_data) <= leader_index:
+        raise ValueError("Skyfield baseline dataset has no leader spacecraft at index 0.")
+
+    base_leader = skf_sim_data.sim_data[leader_index]
+    leader_name = base_leader.satellite_name
+
+    # Baseline time grid and state
+    t_base = np.ravel(base_leader.time) / 3600.0  # [hours]
+    t_base, base_pos = data_processor.ensure_increasing(t_base, base_leader.pos)
+    _,      base_vel = data_processor.ensure_increasing(t_base, base_leader.vel)
+
+    n_base = t_base.size
+
+    if base_pos.shape != base_vel.shape:
+        raise ValueError(
+            f"Baseline position and velocity shapes do not match: "
+            f"pos={base_pos.shape}, vel={base_vel.shape}"
+        )
+
+    if base_pos.shape[0] != 3:
+        raise ValueError(f"Expected baseline position shape (3, n), got {base_pos.shape}")
+
+    # --------- Load evaluated Basilisk datasets ---------
+    bsk_sim_data_list: list[tuple[str, SimData, str]] = []
+
+    for ts, legend_label in bsk_data_timestamps:
+        bsk_stamp = f"{ts}_bsk"
+        bsk_files = data_loader.get_datafiles_by_timestamp(bsk_stamp)
+        if len(bsk_files) == 0:
+            raise FileNotFoundError(f"No Basilisk datafiles found for timestamp '{bsk_stamp}'")
+
+        sim_data = data_loader.load_sim_data_file(bsk_files[0])
+        bsk_sim_data_list.append((ts, sim_data, legend_label))
+
+    # --------- Assign colors ---------
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        default_colors = ["C0", "C1", "C2", "C3", "C4", "C5"]
+
+    def get_color(i: int) -> str:
+        return default_colors[i % len(default_colors)]
+
+    # Dataset entries:
+    # label, time_hours, pos_3xn, color
+    datasets: list[tuple[str, np.ndarray, np.ndarray, str]] = []
+
+    # Baseline is included as a zero-error reference
+    datasets.append((base_label, t_base, base_pos, get_color(0)))
+
+    for i, (ts, sim_data, legend_label) in enumerate(bsk_sim_data_list, start=1):
+        if len(sim_data.sim_data) <= leader_index:
+            raise ValueError(f"Basilisk dataset for timestamp {ts} has no leader at index 0.")
+
+        eval_leader = sim_data.sim_data[leader_index]
+
+        t_eval = np.ravel(eval_leader.time) / 3600.0  # [hours]
+        t_eval, eval_pos = data_processor.ensure_increasing(t_eval, eval_leader.pos)
+
+        if eval_pos.shape[0] != 3:
+            raise ValueError(
+                f"Expected evaluated position shape (3, n) for timestamp {ts}, got {eval_pos.shape}"
+            )
+
+        datasets.append((legend_label, t_eval, eval_pos, get_color(i)))
+
+    # --------- Compute RTN position errors on baseline time grid ---------
+    # RTN indexing follows calculate_eci2rtn_rotmat:
+    #   row 0: R radial
+    #   row 1: T along-track
+    #   row 2: N cross-track
+    rtn_errors: dict[str, np.ndarray] = {}
+
+    for label, t_eval, eval_pos, _ in datasets:
+        if label == base_label:
+            rtn_errors[label] = np.zeros((3, n_base), dtype=np.float64)
+            continue
+
+        # Interpolate evaluated position onto the baseline time grid
+        if t_eval.size != t_base.size or not np.allclose(t_eval, t_base):
+            eval_pos_on_base = data_processor.interp_3xn(t_eval, eval_pos, t_base)
+        else:
+            eval_pos_on_base = eval_pos
+
+        # ECI position difference: evaluated - baseline
+        diff_eci = eval_pos_on_base - base_pos
+
+        # Transform each difference vector into baseline leader RTN frame
+        diff_rtn = np.zeros_like(diff_eci)
+
+        for k in range(n_base):
+            base_pos_k = base_pos[:, k:k+1]
+            base_vel_k = base_vel[:, k:k+1]
+            diff_eci_k = diff_eci[:, k:k+1]
+
+            R_eci2rtn = data_processor.calculate_eci2rtn_rotmat(base_pos_k, base_vel_k)
+            diff_rtn[:, k:k+1] = R_eci2rtn @ diff_eci_k
+
+        # Store in km for readability
+        rtn_errors[label] = diff_rtn / 1000.0
+
+    # --------- Plot RTN components ---------
+    IDX_R = 0
+    IDX_T = 1
+    IDX_N = 2
+
+    fig, (ax_T, ax_N, ax_R) = plt.subplots(
+        nrows=3,
+        ncols=1,
+        sharex=True,
+        figsize=(PLT_WIDTH, PLT_HEIGHT),
+    )
+
+    for label, _, _, color in datasets:
+        ax_T.plot(
+            t_base,
+            rtn_errors[label][IDX_T],
+            label=label,
+            color=color,
+            linewidth=1.5,
+        )
+
+    ax_T.set_ylabel(r"$(r_\mathrm{bsk}^f - r_\mathrm{skf}^f)(T)$ [km]")
+    ax_T.set_title("Along-Track (T) Position Difference")
+    ax_T.grid(True, alpha=0.3)
+
+    for label, _, _, color in datasets:
+        ax_N.plot(
+            t_base,
+            rtn_errors[label][IDX_N],
+            label=label,
+            color=color,
+            linewidth=1.5,
+        )
+
+    ax_N.set_ylabel(r"$(r_\mathrm{bsk}^f - r_\mathrm{skf}^f)(N)$ [km]")
+    ax_N.set_title("Cross-Track (N) Position Difference")
+    ax_N.grid(True, alpha=0.3)
+
+    for label, _, _, color in datasets:
+        ax_R.plot(
+            t_base,
+            rtn_errors[label][IDX_R],
+            label=label,
+            color=color,
+            linewidth=1.5,
+        )
+
+    ax_R.set_ylabel(r"$(r_\mathrm{bsk}^f - r_\mathrm{skf}^f)(R)$ [km]")
+    ax_R.set_xlabel("Time (hours)")
+    ax_R.set_title("Radial (R) Position Difference")
+    ax_R.grid(True, alpha=0.3)
+
+    # Shared legend
+    handles, labels = ax_T.get_legend_handles_labels()
+    ax_T.legend(
+        handles,
+        labels,
+        loc="upper right",
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=True,
+        ncol=1,
+    )
+
+    fig.suptitle(
+        f"RTN Position Difference Comparison for Leader: '{leader_name}'"
+    )
+
+    plt_identifier = f"{main_plt_identifier}_{leader_name}"
+    conditional_save_plot(cfg, fig, plt_identifier)
+    conditional_show_plot(cfg)
+
+
+
+
+def plot_leader_oe_diff(
+    cfg: Config,
+    skf_base_data_timestamp: str,
+    bsk_data_timestamps: list[tuple[str, str]],
+    base_label: str,
+) -> None:
+    """
+    Compare multiple Basilisk simulations against a single Skyfield baseline
+    by plotting leader orbital element differences over time.
+
+    The plotted difference is:
+        alpha_L,eval - alpha_L,base
+
+    where the baseline is the Skyfield leader and each evaluated case is a
+    Basilisk leader trajectory.
+
+    Output: ONE figure with 6 thin vertically stacked subplots:
+      1. da      [km]
+      2. de      [-]
+      3. di      [deg]
+      4. dOmega  [deg]
+      5. domega  [deg]
+      6. dM      [deg]
+
+    Notes:
+        - Uses leader spacecraft at index 0.
+        - Basilisk trajectories are interpolated onto the Skyfield baseline time grid.
+        - Angular differences are wrapped to [-pi, pi] and then unwrapped for plotting.
+        - For near-circular orbits, omega and M can be individually noisy because
+          the periapsis direction is weakly defined.
+    """
+    main_plt_identifier = "LeaderOEDiff"
+
+    data_loader = DataLoader()
+    data_processor = DataProcessor()
+
+    # Earth gravitational parameter [m^3/s^2]
+    MU_EARTH = 3.986004418e14
+
+    # Numerical thresholds
+    EPS = 1e-12
+
+    # ------------------------------------------------------------------
+    # Helper functions
+    # ------------------------------------------------------------------
+    def wrap_to_pi(angle_rad: np.ndarray) -> np.ndarray:
+        """Wrap angles to [-pi, pi]."""
+        return (angle_rad + np.pi) % (2.0 * np.pi) - np.pi
+
+    def angular_diff(eval_angle_rad: np.ndarray, base_angle_rad: np.ndarray) -> np.ndarray:
+        """
+        Compute continuous angular difference eval - base.
+
+        First wraps the pointwise difference to [-pi, pi], then unwraps the
+        resulting time series to avoid artificial jumps in the plot.
+        """
+        return np.unwrap(wrap_to_pi(eval_angle_rad - base_angle_rad))
+
+    def sort_state_by_time(
+        t: np.ndarray,
+        pos: np.ndarray,
+        vel: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sort time, position and velocity using one common time index."""
+        idx = np.argsort(t)
+        return t[idx], pos[:, idx], vel[:, idx]
+
+    def rv_to_classical_oe_series(
+        pos_3xn: np.ndarray,
+        vel_3xn: np.ndarray,
+        mu: float,
+    ) -> dict[str, np.ndarray]:
+        """
+        Convert ECI position/velocity time series to classical orbital elements.
+
+        Returns:
+            {
+                "a":     semimajor axis [m],
+                "e":     eccentricity [-],
+                "i":     inclination [rad],
+                "Omega": RAAN [rad],
+                "omega": argument of periapsis [rad],
+                "M":     mean anomaly [rad],
+            }
+        """
+        if pos_3xn.shape[0] != 3 or vel_3xn.shape[0] != 3:
+            raise ValueError(
+                f"Expected position and velocity shapes (3, n), got "
+                f"pos={pos_3xn.shape}, vel={vel_3xn.shape}"
+            )
+
+        if pos_3xn.shape[1] != vel_3xn.shape[1]:
+            raise ValueError(
+                f"Position and velocity sample counts do not match: "
+                f"pos={pos_3xn.shape}, vel={vel_3xn.shape}"
+            )
+
+        n = pos_3xn.shape[1]
+
+        a_arr = np.zeros(n, dtype=np.float64)
+        e_arr = np.zeros(n, dtype=np.float64)
+        i_arr = np.zeros(n, dtype=np.float64)
+        Omega_arr = np.zeros(n, dtype=np.float64)
+        omega_arr = np.zeros(n, dtype=np.float64)
+        M_arr = np.zeros(n, dtype=np.float64)
+
+        k_hat = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+        for idx in range(n):
+            r_vec = pos_3xn[:, idx].astype(np.float64)
+            v_vec = vel_3xn[:, idx].astype(np.float64)
+
+            r_norm = np.linalg.norm(r_vec)
+            v_norm = np.linalg.norm(v_vec)
+
+            if r_norm < EPS:
+                raise ValueError(f"Position norm is too small at sample {idx}.")
+
+            h_vec = np.cross(r_vec, v_vec)
+            h_norm = np.linalg.norm(h_vec)
+
+            if h_norm < EPS:
+                raise ValueError(f"Angular momentum norm is too small at sample {idx}.")
+
+            n_vec = np.cross(k_hat, h_vec)
+            n_norm = np.linalg.norm(n_vec)
+
+            e_vec = np.cross(v_vec, h_vec) / mu - r_vec / r_norm
+            e_norm = np.linalg.norm(e_vec)
+
+            specific_energy = 0.5 * v_norm**2 - mu / r_norm
+
+            # Elliptic semimajor axis
+            if abs(specific_energy) < EPS:
+                a = np.inf
+            else:
+                a = -mu / (2.0 * specific_energy)
+
+            # Inclination
+            inc = np.arccos(np.clip(h_vec[2] / h_norm, -1.0, 1.0))
+
+            # RAAN
+            if n_norm > EPS:
+                Omega = np.arctan2(n_vec[1], n_vec[0]) % (2.0 * np.pi)
+            else:
+                Omega = 0.0
+
+            # Argument of periapsis
+            if n_norm > EPS and e_norm > EPS:
+                omega = np.arctan2(
+                    np.dot(np.cross(n_vec, e_vec), h_vec) / (n_norm * e_norm * h_norm),
+                    np.dot(n_vec, e_vec) / (n_norm * e_norm),
+                ) % (2.0 * np.pi)
+            else:
+                omega = 0.0
+
+            # True anomaly
+            if e_norm > EPS:
+                f = np.arctan2(
+                    np.dot(np.cross(e_vec, r_vec), h_vec) / (e_norm * r_norm * h_norm),
+                    np.dot(e_vec, r_vec) / (e_norm * r_norm),
+                ) % (2.0 * np.pi)
+            else:
+                # Circular fallback: use argument of latitude if possible.
+                if n_norm > EPS:
+                    f = np.arctan2(
+                        np.dot(np.cross(n_vec, r_vec), h_vec) / (n_norm * r_norm * h_norm),
+                        np.dot(n_vec, r_vec) / (n_norm * r_norm),
+                    ) % (2.0 * np.pi)
+                else:
+                    # Circular equatorial fallback: true longitude.
+                    f = np.arctan2(r_vec[1], r_vec[0]) % (2.0 * np.pi)
+
+            # Mean anomaly for elliptic orbit
+            if e_norm < 1.0 - EPS:
+                # Eccentric anomaly from true anomaly
+                E = 2.0 * np.arctan2(
+                    np.sqrt(1.0 - e_norm) * np.sin(f / 2.0),
+                    np.sqrt(1.0 + e_norm) * np.cos(f / 2.0),
+                )
+                E = E % (2.0 * np.pi)
+                M = (E - e_norm * np.sin(E)) % (2.0 * np.pi)
+            else:
+                # Not expected for this LEO case, but prevents silent failure.
+                M = np.nan
+
+            a_arr[idx] = a
+            e_arr[idx] = e_norm
+            i_arr[idx] = inc
+            Omega_arr[idx] = Omega
+            omega_arr[idx] = omega
+            M_arr[idx] = M
+
+        return {
+            "a": a_arr,
+            "e": e_arr,
+            "i": i_arr,
+            "Omega": Omega_arr,
+            "omega": omega_arr,
+            "M": M_arr,
+        }
+
+    # ------------------------------------------------------------------
+    # Load baseline Skyfield data
+    # ------------------------------------------------------------------
+    skf_stamp = f"{skf_base_data_timestamp}_skf"
+    skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
+
+    if len(skf_files) == 0:
+        raise FileNotFoundError(f"No Skyfield baseline datafiles found for timestamp '{skf_stamp}'")
+
+    skf_sim_data = data_loader.load_sim_data_file(skf_files[0])
+
+    leader_index = 0
+    if len(skf_sim_data.sim_data) <= leader_index:
+        raise ValueError("Skyfield baseline dataset has no leader spacecraft at index 0.")
+
+    base_leader = skf_sim_data.sim_data[leader_index]
+    leader_name = base_leader.satellite_name
+
+    t_base = np.ravel(base_leader.time) / 3600.0  # [hours]
+    t_base, base_pos, base_vel = sort_state_by_time(
+        t_base,
+        base_leader.pos,
+        base_leader.vel,
+    )
+
+    base_oe = rv_to_classical_oe_series(base_pos, base_vel, MU_EARTH)
+
+    # ------------------------------------------------------------------
+    # Load evaluated Basilisk runs
+    # ------------------------------------------------------------------
+    bsk_sim_data_list: list[tuple[str, SimData, str]] = []
+
+    for ts, legend_label in bsk_data_timestamps:
+        bsk_stamp = f"{ts}_bsk"
+        bsk_files = data_loader.get_datafiles_by_timestamp(bsk_stamp)
+
+        if len(bsk_files) == 0:
+            raise FileNotFoundError(f"No Basilisk datafiles found for timestamp '{bsk_stamp}'")
+
+        sim_data = data_loader.load_sim_data_file(bsk_files[0])
+        bsk_sim_data_list.append((ts, sim_data, legend_label))
+
+    # ------------------------------------------------------------------
+    # Colors and datasets
+    # ------------------------------------------------------------------
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        default_colors = ["C0", "C1", "C2", "C3", "C4", "C5"]
+
+    def get_color(i: int) -> str:
+        return default_colors[i % len(default_colors)]
+
+    # Store differences for plotting
+    # Each entry: label -> dict[element_name, diff_array]
+    oe_diffs: dict[str, dict[str, np.ndarray]] = {}
+
+    # Baseline zero reference
+    oe_diffs[base_label] = {
+        "da": np.zeros_like(t_base),
+        "de": np.zeros_like(t_base),
+        "di": np.zeros_like(t_base),
+        "dOmega": np.zeros_like(t_base),
+        "domega": np.zeros_like(t_base),
+        "dM": np.zeros_like(t_base),
+    }
+
+    plot_entries: list[tuple[str, str]] = [(base_label, get_color(0))]
+
+    for i, (ts, sim_data, legend_label) in enumerate(bsk_sim_data_list, start=1):
+        if len(sim_data.sim_data) <= leader_index:
+            raise ValueError(f"Basilisk dataset for timestamp {ts} has no leader at index 0.")
+
+        eval_leader = sim_data.sim_data[leader_index]
+
+        t_eval = np.ravel(eval_leader.time) / 3600.0  # [hours]
+        t_eval, eval_pos, eval_vel = sort_state_by_time(
+            t_eval,
+            eval_leader.pos,
+            eval_leader.vel,
+        )
+
+        # Interpolate evaluated state onto baseline time grid
+        if t_eval.size != t_base.size or not np.allclose(t_eval, t_base):
+            eval_pos_on_base = data_processor.interp_3xn(t_eval, eval_pos, t_base)
+            eval_vel_on_base = data_processor.interp_3xn(t_eval, eval_vel, t_base)
+        else:
+            eval_pos_on_base = eval_pos
+            eval_vel_on_base = eval_vel
+
+        eval_oe = rv_to_classical_oe_series(eval_pos_on_base, eval_vel_on_base, MU_EARTH)
+
+        oe_diffs[legend_label] = {
+            # Convert da to km
+            "da": (eval_oe["a"] - base_oe["a"]) / 1000.0,
+
+            # Eccentricity is dimensionless
+            "de": eval_oe["e"] - base_oe["e"],
+
+            # Convert angular differences to deg
+            "di": np.rad2deg(angular_diff(eval_oe["i"], base_oe["i"])),
+            "dOmega": np.rad2deg(angular_diff(eval_oe["Omega"], base_oe["Omega"])),
+            "domega": np.rad2deg(angular_diff(eval_oe["omega"], base_oe["omega"])),
+            "dM": np.rad2deg(angular_diff(eval_oe["M"], base_oe["M"])),
+        }
+
+        plot_entries.append((legend_label, get_color(i)))
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+    fig, axes = plt.subplots(
+        nrows=6,
+        ncols=1,
+        sharex=True,
+        figsize=(PLT_WIDTH, 1.35 * PLT_HEIGHT),
+    )
+
+    element_order = ["da", "de", "di", "dOmega", "domega", "dM"]
+
+    y_labels = {
+        "da": r"$\Delta a$ [km]",
+        "de": r"$\Delta e$ [-]",
+        "di": r"$\Delta i$ [deg]",
+        "dOmega": r"$\Delta \Omega$ [deg]",
+        "domega": r"$\Delta \omega$ [deg]",
+        "dM": r"$\Delta M$ [deg]",
+    }
+
+    for ax, element_name in zip(axes, element_order):
+        for label, color in plot_entries:
+            ax.plot(
+                t_base,
+                oe_diffs[label][element_name],
+                label=label,
+                color=color,
+                linewidth=1.0,
+            )
+
+        ax.set_ylabel(y_labels[element_name])
+        ax.grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("Time (hours)")
+
+    # One shared legend in the top subplot
+    handles, labels = axes[0].get_legend_handles_labels()
+    axes[0].legend(
+        handles,
+        labels,
+        loc="upper right",
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=True,
+        ncol=1,
+    )
+
+    fig.suptitle(
+        rf"Orbital Element Difference Comparison for Leader {leader_name} "
+        rf"($\alpha_{{L,bsk}} - \alpha_{{L,skf}}$)"
+    )
+
+    plt_identifier = f"{main_plt_identifier}_{leader_name}"
+    conditional_save_plot(cfg, fig, plt_identifier)
+    conditional_show_plot(cfg)
 
 
 
@@ -1927,7 +2544,7 @@ def plot_alt_multi_sim_diff(
     EARTH_MEAN_RADIUS_M = 6378136.6 # [m] WGS-84 equatorial radius
 
     # --------- Load Skyfield baseline ---------
-    skf_stamp = f"{skf_base_data_timestamp}_skf"
+    skf_stamp = f"{skf_base_data_timestamp}_skf" # CHANGEEEEEE
     skf_files = data_loader.get_datafiles_by_timestamp(skf_stamp)
     if len(skf_files) == 0:
         raise FileNotFoundError(f"No Skyfield datafiles found for timestamp '{skf_stamp}'")
@@ -2038,7 +2655,7 @@ def plot_alt_multi_sim_diff(
     )
 
     fig.suptitle(
-        f"Altitude Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
+        f"Altitude Difference Comparison for Leader spacecraft: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2331,7 +2948,7 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     ax_posdiff.set_ylabel(
         r"$\|r_{\mathrm{Bsk}} - r_{\mathrm{Skf}}\|\;[\mathrm{km}]$"
     )
-    ax_posdiff.set_title("ECI Position Difference Magnitude")
+    ax_posdiff.set_title("Position Difference Magnitude")
     ax_posdiff.grid(True, alpha=0.3)
 
     # Bottom: velocity delta magnitude
@@ -2342,7 +2959,7 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     ax_veldiff.set_ylabel(
         r"$\|v_{\mathrm{Bsk}} - v_{\mathrm{Skf}}\|\;[\mathrm{m/s}]$"
     )
-    ax_veldiff.set_title("ECI Velocity Difference Magnitude")
+    ax_veldiff.set_title("Velocity Difference Magnitude")
     ax_veldiff.grid(True, alpha=0.3)
 
     # ---- Single shared legend ----
@@ -2357,7 +2974,7 @@ def plot_multi_sim_pos_vel_sim_diff_mag(
     )
 
     fig.suptitle(
-        f"Earth-Relative State Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
+        f"ECI State Difference Magnitude Comparison for Leader: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2473,7 +3090,7 @@ def plot_multi_sim_pos_sim_diff_mag(
     ax.set_ylabel(
         r"$\|r_{\mathrm{Bsk}} - r_{\mathrm{Skf}}\|\;[\mathrm{km}]$"
     )
-    ax.set_title("ECI Position Difference Magnitude")
+    # ax.set_title("ECI Position Difference Magnitude")
     ax.grid(True, alpha=0.3)
 
     ax.legend(
@@ -2483,7 +3100,7 @@ def plot_multi_sim_pos_sim_diff_mag(
     )
 
     fig.suptitle(
-        f"Earth-Relative Position Differences: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'"
+        f"ECI Position Difference Magnitude Comparison for Leader: '{chief_sat_name}'"
     )
 
     plt_identifier = f"{main_plt_identifier}_{follower_name}_vs_{chief_sat_name}"
@@ -2664,7 +3281,7 @@ def plot_groundtrack_multi_sim_comparison_start_stop(
         )
 
     ax.set_title(
-        f"Groundtrack comparison: Full Basilisk Configuration vs. Skyfield for Leader: '{chief_sat_name}'\n"
+        f"Groundtrack Comparison for Leader: '{chief_sat_name}'\n"
         f"t ∈ [{start_plot_time_hours:.2f}, {end_plot_time_hours:.2f}] h"
     )
     ax.legend(loc="upper right")

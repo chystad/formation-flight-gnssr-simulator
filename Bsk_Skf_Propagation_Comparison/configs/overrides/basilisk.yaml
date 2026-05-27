@@ -1,14 +1,14 @@
 # These configuration options are currently in configs/default.yaml
 BASILISK_SIMULATION:
-  deltaT:                     5 # Solver time step [seconds]
+  deltaT:                     1.0 # Solver time step [seconds]
   integrator:                 "RKF78" # [RK4(Default), RKF45, RKF78]
 
   sphericalHarmonicsDegree:   4 # int >= 2
 
   useSphericalHarmonics:      true
 
-  useMsisDrag:                true # First priority
-  useExponentialDensityDrag:  false # Second priority
+  useMsisDrag:                false # First priority
+  useExponentialDensityDrag:  true # Second priority
 
   useSRP:                     true
 

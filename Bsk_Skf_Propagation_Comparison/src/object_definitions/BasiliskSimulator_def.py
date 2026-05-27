@@ -496,19 +496,19 @@ class BasiliskSimulator:
             # ---- Define and append scRecorders and scObjects ----
             # Create object state and force recorders
             scRec = scObj.scStateOutMsg.recorder(samplingTime)
-            assert atm is not None
-            atmLog = atm.envOutMsgs[i].recorder(samplingTime)
+            if atm is not None:
+                atmLog = atm.envOutMsgs[i].recorder(samplingTime)
+                self.scSim.AddModelToTask(self.simTaskName, atmLog)
+                self.atmRecorders.append(atmLog)
             # srpRec = self.make_srp_recorder(srp, samplingTime)  
 
             # Add recorder to the simulation process
             self.scSim.AddModelToTask(self.simTaskName, scRec)
-            self.scSim.AddModelToTask(self.simTaskName, atmLog)
             # self.scSim.AddModelToTask(self.simTaskName, srpRec)
                         
             # Append defined spacecraft object and scRec to scObjects and scRecorders, respectively
             self.scObjects.append(scObj)
             self.scRecorders.append(scRec)
-            self.atmRecorders.append(atmLog)
             # self.srpRecorders.append(srpRec)       
 
 
@@ -775,7 +775,7 @@ class BasiliskSimulator:
 
             # Exponential atmosphere parameters
             atm.planetRadius = EARTH_RADIUS
-            atm.scaleHeight = 15180.0      # [m] typical scale height (7200 before tuning)
+            atm.scaleHeight = 15180.0      # [m] typical scale height (7200 before tuning, 15180 tuned)
             atm.baseDensity = 1.225         # [kg/m^3] density at 0 m
             atm.envMinReach = 0.0           # [m]
             atm.envMaxReach = 1000e3        # [m] cap model above 1000 km
