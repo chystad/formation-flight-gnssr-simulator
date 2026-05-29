@@ -68,6 +68,8 @@ class Config:
         num_satellites =        int(    cfg['SIMULATION']['num_satellites'])
         sat_init_source =       str(    cfg['SIMULATION']['sat_init_source'])
         data_mode =             str(    cfg['SIMULATION']['data_mode'])
+        save_debug_plots =      bool(   cfg['SIMULATION']['save_debug_plots'])
+        output_data_every_24h = bool(   cfg['SIMULATION']['output_data_every_24h'])
         shared_deployer_OEs =           cfg['SIMULATION']['shared_deployer_OEs']
         all_sat_params =                cfg['SATELLITES'] # dict[str, dict[str, Any]]
         all_gs_params =                 cfg['GROUND_STATIONS'] # dict[str, dict[str, Any]]     
@@ -213,6 +215,8 @@ class Config:
         self.num_satellites: int = num_satellites
         self.sat_init_source: str = sat_init_source
         self.data_mode: str = data_mode
+        self.save_debug_plots: bool = save_debug_plots
+        self.output_data_every_24h: bool = output_data_every_24h
         self.output_data_save_dir: Path = self._build_output_data_save_dir(mc_cfg, run_idx)
         self.shared_deployer_OEs: orbitalMotion.ClassicElements = self._generate_deployer_oe_instance_from_config(shared_deployer_OEs)
 
@@ -503,7 +507,7 @@ class Config:
             oe.a = deployer_OEs["a"] * 1000                 # [m]
             oe.e = deployer_OEs["e"]                        # [-]
             oe.i = deployer_OEs["i"] * macros.D2R           # [Rad]
-            oe.Omega = deployer_OEs["omega"] * macros.D2R   # [Rad]
+            oe.Omega = deployer_OEs["Omega"] * macros.D2R   # [Rad]
             oe.omega = deployer_OEs["omega"] * macros.D2R   # [Rad]
             oe.f = deployer_OEs["f"] * macros.D2R           # [Rad]
 
