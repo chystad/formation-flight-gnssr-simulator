@@ -216,7 +216,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # ------------------------------------------------------------------
         # 4) Setup recorder flusher
         # ------------------------------------------------------------------
-        if self.cfg.mc_enabled or (not self.cfg.data_mode == "debug"):
+        if self.cfg.output_data_every_24h:
             self._setup_recorder_flusher()
 
 
@@ -230,8 +230,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # ------------------------------------------------------------------
         # 6) Initialize and configure stop time
         # ------------------------------------------------------------------
-        if not self.cfg.mc_enabled:
-            self.SetProgressBar(True)
+        self.SetProgressBar(False)
         self.InitializeSimulation()
         self.ConfigureStopTime(self.simulationDurationNanos)
 
@@ -268,7 +267,7 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
         # dataWriter.write_data_to_files()
         # del dataWriter # free up buffer
 
-        if self.cfg.mc_enabled or (not self.cfg.data_mode == "debug"):
+        if self.cfg.output_data_every_24h:
             # Output tail data and reset recorders
             if hasattr(self, "recorderFlusher"):
                 self.recorderFlusher.flush()
@@ -284,14 +283,22 @@ class BasiliskSimulator(SimulationBaseClass.SimBaseClass):
             dataWriter.write_data_to_files()
             del dataWriter # free up buffer
 
-            plt_sat_idx = 1
-            # plt.plot_all_formation_plots(scSimDataList)
-            plt.plot_all_thruster_fuel_plots(scSimDataList)
-            # plt.plot_all_per_satellite_GNC_plots(scSimDataList, plt_sat_idx)
-            plt.plot_all_eps_plots(scSimDataList, plt_sat_idx, self.cfg.bat_storage_capacity)
-            plt.plot_all_pointing_mode_plots(scSimDataList, plt_sat_idx)
-            plt.mpl.show()
-            self.cfg.bat_storage_capacity
+            if self.cfg.data_mode == "debug":
+                plt_sat_idx = 1
+                save_plt = self.cfg.save_debug_plots
+                plt_out_dir = self.cfg.output_data_save_dir
+                plt.plot_all_formation_plots(save_plt, plt_out_dir, scSimDataList)
+                plt.plot_all_thruster_fuel_plots(save_plt, plt_out_dir, scSimDataList)
+                plt.plot_all_per_satellite_GNC_plots(save_plt, plt_out_dir, scSimDataList, plt_sat_idx)
+                plt.plot_all_eps_plots(save_plt, plt_out_dir, scSimDataList, plt_sat_idx, self.cfg.bat_storage_capacity)
+                plt.plot_all_pointing_mode_plots(save_plt, plt_out_dir, scSimDataList, plt_sat_idx)
+                
+                # NOTE: Uncomment to see all plots
+                # plt.mpl.show()
+
+                # If the plots are saved, close them afterwards to save memory. Important for Monte Carlo campaigns
+                if save_plt and self.cfg.mc_enabled:
+                    plt.mpl.close("all")
 
             # Release data
             del scSimDataList
