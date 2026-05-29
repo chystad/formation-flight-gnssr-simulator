@@ -1,7 +1,7 @@
 MONTE_CARLO:
-  mc_enabled: false  # Toggle for running many bsk simulation for varying satellite initial conditions. 
+  mc_enabled: true  # Toggle for running many bsk simulation for varying satellite initial conditions. 
                     # This toggle also affect how sim data gets outputted and visualized
-  num_bsk_sims: 3   # Total number of bsk simulations to be run in a single Monte Carlo run
+  num_bsk_sims: 5   # Total number (inkl. base run) of bsk simulations to be run in a single Monte Carlo campaign
 
   # Descriptions used to create run metadata (No impact on simulation)
   desc_gnssr_formation_type: constant along-track separation
