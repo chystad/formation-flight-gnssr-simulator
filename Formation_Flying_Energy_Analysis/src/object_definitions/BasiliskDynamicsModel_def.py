@@ -909,7 +909,7 @@ class BasiliskDynamicsModel:
         self.fuelTankStateRecorder_RateNanos = fuelTankStateRate
 
         # Optional 'debug' recorders
-        if self.sim.cfg.data_mode == "debug" and (not self.sim.cfg.mc_enabled):
+        if self.sim.cfg.data_mode == "debug":
             # Thruster recorder
             self.thrusterStateRecorder = self.thrusterEffector.thrusterOutMsgs[0].recorder(thrusterStateRate) # attributes: thrustForce_B [N] + thrustBlowDownFactor [%] + ispBlowDownFactor [%] + (thrustTorquePntB_B) [Nm]
             self.thrusterStateRecorder_RateNanos = thrusterStateRate
