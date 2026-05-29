@@ -36,8 +36,12 @@ BURN_ATT_ADJUSTMENT_TIME_SEC = 15.0 # [s] Fixed time from the burn is requested 
 SHADOWFAC_ENTER_THRESHOLD = 0.6 # The minimum illumination required to enter CHARGE state (0, 1)
 SHADOWFAC_EXIT_THRESHOLD = 0.4 # The maximum illumination requred to exit CHARGE state (0, 1)
 EMERGENCY_BATTERY_EXIT_THRESHOLD = 0.7 # The lower limit for when the battery is considered to have enough charge to exit EMERGENCY mode (0, 1)
-CAPTURE_BATTERY_THRESHOLD = 0.4 # The minimum battery percentage (inclusive) required for entering CAPTURE mode (0, 1)
-COMMS_BATTERY_THRESHOLD = 0.3 # The minimum battery percentage (inclusive) required for entering COMMS mode (0, 1)
+# CAPTURE_BATTERY_THRESHOLD = 0.4 # The minimum battery percentage (inclusive) required for entering CAPTURE mode (0, 1)
+CAPTURE_BATTERY_ENTER_THRESHOLD = 0.45
+CAPTURE_BATTERY_EXIT_THRESHOLD = 0.38
+# COMMS_BATTERY_THRESHOLD = 0.3 # The minimum battery percentage (inclusive) required for entering COMMS mode (0, 1)
+COMMS_BATTERY_ENTER_THRESHOLD = 0.35
+COMMS_BATTERY_EXIT_THRESHOLD = 0.28
 CRITICAL_BATTERY_THRESHOLD = 0.2 # Upper limit (exclusive) for when the battery is considered to have critially low charge left (0, 1)
 LOW_BATTERY_THRESHOLD = 0.3 # Upper limit (exclusive) for when the battery is considere to have low charge left (0.1)
 MAX_HOURS_SINCE_LAST_COM_THRESHOLD = 12 # Limit (incluse) for when the maximum time has passed since last com. 
@@ -672,15 +676,18 @@ class FswStack():
 
         # If 'batStorageFrac' is defined, set 'capBat', 'camBat', 'critBat', 'exitEmergencyFlag'
         if batStorageFrac >= 0:
-            if batStorageFrac >= CAPTURE_BATTERY_THRESHOLD:
-                capBat = True
+            # Capture battery hysteresis:
+            # - If already in CAPTURE, remain allowed until battery drops below exit threshold.
+            # - If not in CAPTURE, only enter CAPTURE after charging above enter threshold.
+            if old_pointing_mode == PointingMode.CAPTURE:
+                capBat = batStorageFrac >= CAPTURE_BATTERY_EXIT_THRESHOLD
             else:
-                capBat = False
+                capBat = batStorageFrac >= CAPTURE_BATTERY_ENTER_THRESHOLD
             
-            if batStorageFrac >= COMMS_BATTERY_THRESHOLD:
-                comBat = True
+            if old_pointing_mode == PointingMode.COMMS:
+                comBat = batStorageFrac >= COMMS_BATTERY_EXIT_THRESHOLD
             else:
-                comBat = False
+                comBat = batStorageFrac >= COMMS_BATTERY_ENTER_THRESHOLD
 
             if batStorageFrac < CRITICAL_BATTERY_THRESHOLD:
                 critBat = True
@@ -949,7 +956,7 @@ class FswStack():
         elif self.sim.cfg.form_type == "cc":
 
             # Set up the station keeping requirements
-            rho = 1000.0                 # [m]
+            rho = 400.0                  # [m]
             a_ref = 6878137.0            # [m], approximate 500 km Earth orbit
             eps = rho / a_ref            # 1.4539e-4
 
@@ -1075,7 +1082,7 @@ class FswStack():
         self.navTransRecorder_RateNanos = navTransRate
         
         # Optional 'debug' recorders
-        if self.sim.cfg.data_mode == "debug" and (not self.sim.cfg.mc_enabled):
+        if self.sim.cfg.data_mode == "debug":
             # Attitude and angular rate recorder
             self.navAttRecorder = self.nav.attOutMsg.recorder(navAttRate) # sigma_BN [MRP] + omega_BN_B [rad/s]
             self.navAttRecorder_RateNanos =  navAttRate
