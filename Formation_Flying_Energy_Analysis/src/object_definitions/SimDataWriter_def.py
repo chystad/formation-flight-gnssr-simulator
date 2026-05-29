@@ -18,10 +18,13 @@ class SimDataWriter:
         self.scSimDataList = scSimDataList
         self.missionSimData = missionSimData
         self.numSc = len(scSimDataList)
+        self.output_data_every_24h = cfg.output_data_every_24h
+        if cfg.output_data_every_24h:
+            logging.debug(f"WARNING: SimDataWriter initialized even though 'output_data_every_24h' == True. RecorderFlusher should then be responible for data output. Therefore, the writer will always output the optimized data subset if 'write_data_to_files' is called.")
 
     
     def write_data_to_files(self) -> None:
-        if self.mc_enabled or (self.data_mode == "optimized"):
+        if self.data_mode == "optimized" or self.output_data_every_24h:
             self._write_reduced_data_to_files()
         else:
             self._write_full_data_to_files()
@@ -149,6 +152,24 @@ class SimDataWriter:
 
                 if sc_data.obcNetPower is not None:
                     self._write_sampled_data_group(h5, "obcNetPower", sc_data.obcNetPower)
+
+                if sc_data.comNetPower is not None:
+                    self._write_sampled_data_group(h5, "comNetPower", sc_data.comNetPower)
+
+                if sc_data.batHeatNetPower is not None:
+                    self._write_sampled_data_group(h5, "batHeatNetPower", sc_data.batHeatNetPower)
+
+                if sc_data.payNetPower is not None:
+                    self._write_sampled_data_group(h5, "payNetPower", sc_data.payNetPower)
+
+                if sc_data.propIdleNetPower is not None:
+                    self._write_sampled_data_group(h5, "propIdleNetPower", sc_data.propIdleNetPower)
+
+                if sc_data.propHeatNetPower is not None:
+                    self._write_sampled_data_group(h5, "propHeatNetPower", sc_data.propHeatNetPower)
+
+                if sc_data.propThrNetPower is not None:
+                    self._write_sampled_data_group(h5, "propThrNetPower", sc_data.propThrNetPower)
 
                 if sc_data.solarPanelNetPower is not None:
                     self._write_sampled_data_group(h5, "solarPanelNetPower", sc_data.solarPanelNetPower)
