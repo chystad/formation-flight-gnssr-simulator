@@ -55,7 +55,7 @@ class RecorderFlusher(sysModel.SysModel):
         self.cfg = cfg
         self.sc_runtime_bundles = sc_runtime_bundles
         self.output_data_save_dir = cfg.output_data_save_dir
-        self.full_debug = (not cfg.mc_enabled) and cfg.data_mode == "debug"
+        self.full_debug = cfg.data_mode == "debug"
         self.logTag = "REC_FLUSH"
 
         self.ModelTag = "RecorderFlushSysModel"
@@ -228,6 +228,12 @@ class RecorderFlusher(sysModel.SysModel):
 
         assert dyn.thrusterStateRecorder is not None
         assert dyn.obcPowerSinkRecorder is not None
+        assert dyn.comPowerSinkRecorder is not None
+        assert dyn.batHeatPowerSinkRecorder is not None
+        assert dyn.payPowerSinkRecorder is not None
+        assert dyn.propIdlePowerSinkRecorder is not None
+        assert dyn.propHeatPowerSinkRecorder is not None
+        assert dyn.propThrPowerSinkRecorder is not None
 
         chunk["thrustForce_B"] = (
             np.asarray(dyn.thrusterStateRecorder.thrustForce_B, dtype=np.float32),
@@ -245,7 +251,6 @@ class RecorderFlusher(sysModel.SysModel):
             np.asarray(dyn.thrusterStateRecorder.ispBlowDownFactor, dtype=np.float32),
             dyn.thrusterStateRecorder_RateNanos * macros.NANO2SEC,
         )
-
         chunk["rwOmega"] = (
             np.asarray([rec.Omega for rec in dyn.rwStateRecorders], dtype=np.float32).T,
             dyn.rwStateRecorder_RateNanos * macros.NANO2SEC,
@@ -261,6 +266,30 @@ class RecorderFlusher(sysModel.SysModel):
         chunk["obcNetPower"] = (
             np.asarray(dyn.obcPowerSinkRecorder.netPower, dtype=np.float32),
             dyn.obcPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["comNetPower"] = (
+            np.asarray(dyn.comPowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.comPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["batHeatNetPower"] = (
+            np.asarray(dyn.batHeatPowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.batHeatPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["payNetPower"] = (
+            np.asarray(dyn.payPowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.payPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["propIdleNetPower"] = (
+            np.asarray(dyn.propIdlePowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.propIdlePowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["propHeatNetPower"] = (
+            np.asarray(dyn.propHeatPowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.propHeatPowerSinkRecorder_RateNanos * macros.NANO2SEC,
+        )
+        chunk["propThrNetPower"] = (
+            np.asarray(dyn.propThrPowerSinkRecorder.netPower, dtype=np.float32),
+            dyn.propThrPowerSinkRecorder_RateNanos * macros.NANO2SEC,
         )
         chunk["solarPanelNetPower"] = (
             np.asarray([rec.netPower for rec in dyn.solarPanelPowerRecorders], dtype=np.float32).T,
@@ -449,6 +478,19 @@ class RecorderFlusher(sysModel.SysModel):
 
         if dyn.obcPowerSinkRecorder is not None:
             dyn.obcPowerSinkRecorder.clear()
+
+        if dyn.comPowerSinkRecorder is not None:
+            dyn.comPowerSinkRecorder.clear()
+        if dyn.batHeatPowerSinkRecorder is not None:
+            dyn.batHeatPowerSinkRecorder.clear()
+        if dyn.payPowerSinkRecorder is not None:
+            dyn.payPowerSinkRecorder.clear()
+        if dyn.propIdlePowerSinkRecorder is not None:
+            dyn.propIdlePowerSinkRecorder.clear()
+        if dyn.propHeatPowerSinkRecorder is not None:
+            dyn.propHeatPowerSinkRecorder.clear()
+        if dyn.propThrPowerSinkRecorder is not None:
+            dyn.propThrPowerSinkRecorder.clear()
 
         for rec in dyn.solarPanelPowerRecorders:
             rec.clear()
