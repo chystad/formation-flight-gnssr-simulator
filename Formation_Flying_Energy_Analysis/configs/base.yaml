@@ -1,19 +1,22 @@
 # Overall simulation settings
 SIMULATION:
   startTime: "23.10.2025 22:19:30" # "23.10.2025 22:19:30" # "02.01.2026 04:45:41" # UTC time. 'dd.mm.yyyy hh:mm:ss'
-  simulationDuration: 24 # [hours] 2160=3mnd, 720=1mnd
+  simulationDuration: 48 # [hours] 2160=3mnd, 720=1mnd
   deltaT: 0.5 # [sec] Solver max time step 
-  integrator: "RKF45" # [RK4(Default), RKF45, RKF78]
-  num_satellites: 2
+  integrator: "RKF78" # [RK4(Default), RKF45, RKF78]
+  num_satellites: 2 
   sat_init_source: "oe" # [oe, vec]
   data_mode: "debug" # "optimized" for fewer recorders and long time horizons, "debug" for all recorders and short time horizons
+  save_debug_plots: true # Save plots IF data_mode == "debug"
+  output_data_every_24h: false # Data is outputted using RecorderFlusher, which outputs data to file every 24h
+                               # (and is is supposed to clear recorder data buffers, but memory overflow is still an issue.)
   shared_deployer_OEs: # Sat init state becomes: elem2rv(deployer_OEs) + deployment_vel
-    a: 6798.        # [km]  Semi-major axis
-    e: 0.004161     # [-]   Eccentricity
-    i: 97.3166      # [deg] Inclination
-    Omega: 6.7052   # [deg] RAAN
-    omega: 83.3535  # [deg] Argument of periapsis
-    f: 276.82       # [deg] Anomaly
+    a: 6795.265 # 6798.        # [km]  Semi-major axis
+    e: 0.0003505 # 0.004161     # [-]   Eccentricity
+    i: 97.3149 # 97.3166      # [deg] Inclination
+    Omega: 21.2407 # 6.7052   # [deg] RAAN
+    omega: 39.5066 # 83.3535  # [deg] Argument of periapsis
+    f: 320.6441 # 276.82       # [deg] Anomaly
 
 # Satellite parameters
 SATELLITES:
@@ -137,7 +140,7 @@ RW_PARAMETERS:
 # Thruster parameters (same for all satellites)
 THRUSTER_PARAMETERS:
   thr_pos_B: [0., 0., 0.] # [m] vector with thruster location in B-frame components
-  thr_dir_B: [-1., 0., 0.] # [-] Unit vector with thruster force direction
+  thr_dir_B: [1., 0., 0.] # [-] Unit vector with thruster force direction
 
   thr_model_override: "None" # ['MOOG_Monarc_1', 'MOOG_Monarc_5', 'MOOG_Monarc_22_6', 'MOOG_Monarc_90HT']
                              # [WARNING] Chosing any of the above values OVERRIDES the thruster params under.
