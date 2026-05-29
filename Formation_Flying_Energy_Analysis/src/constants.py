@@ -12,12 +12,12 @@ VIZARD_SAVE_PATH = "/home/chris/code/formation-flight-gnssr-simulator/Formation_
 
 # Model rates [<time>/update] TODO: Move to Config
 ENV_RATE: float = 1.0 # [s/update] Update rate for environment models
-DYN_RATE: float = 0.2 # [s/update] Update rate for dynamical models
-FSW_RATE: float = 0.2 # [s/update] Update rate for flight software stack
+DYN_RATE: float = 0.1 # [s/update] Update rate for dynamical models
+FSW_RATE: float = 0.1 # [s/update] Update rate for flight software stack
 MSIS_RATE: float = 30. # [s/update] Update rate for MSIS input parameters
-FLUSH_RATE: float = 24. # [hour/update]
+FLUSH_RATE: float = 24. # [hour/update] How often the recorder data should be outputted to file and cleared from buffer
 
 # Recorder sample rates [s/sample]
 HIGH_SAMPLE_RATE: float = 0.2 # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
-MID_SAMPLE_RATE: float = 1. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
+MID_SAMPLE_RATE: float = 5. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
 LOW_SAMPLE_RATE: float = 60. # [s/sample] NOTE: Must be integer multilple of 'DYN_RATE'
